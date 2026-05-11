@@ -1,0 +1,100 @@
+{
+  "entities": {
+    "Product": {
+      "title": "Product",
+      "description": "Stock items and products",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "name": { "type": "string" },
+        "price": { "type": "number" },
+        "cost": { "type": "number" },
+        "stock": { "type": "number" },
+        "category": { "type": "string" },
+        "barcode": { "type": "string" },
+        "image": { "type": "string" },
+        "unit": { "type": "string" },
+        "minStock": { "type": "number" }
+      },
+      "required": ["id", "ownerId", "name", "price", "stock"]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "Customer profiles and udhar status",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "balance": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "lastTransactionAt": { "type": "string" }
+      },
+      "required": ["id", "ownerId", "name", "balance"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Record of sales and payments",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "type": { "type": "string", "enum": ["sale", "received", "given"] },
+        "amount": { "type": "number" },
+        "description": { "type": "string" },
+        "customerId": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerPhone": { "type": "string" },
+        "paymentMethod": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "productId": { "type": "string" },
+              "quantity": { "type": "number" },
+              "price": { "type": "number" }
+            }
+          }
+        }
+      },
+      "required": ["id", "ownerId", "type", "amount", "createdAt"]
+    },
+    "Settings": {
+      "title": "Shop Settings",
+      "description": "User preferences and shop details",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "address": { "type": "string" },
+        "currency": { "type": "string" },
+        "language": { "type": "string" },
+        "logoUrl": { "type": "string" },
+        "ownerEmail": { "type": "string" }
+      }
+    }
+  },
+  "firestore": {
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "Individual product documents"
+    },
+    "/customers/{customerId}": {
+      "schema": "Customer",
+      "description": "Individual customer documents"
+    },
+    "/transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "Individual transaction documents"
+    },
+    "/settings/{userId}": {
+      "schema": "Settings",
+      "description": "Shop settings per user"
+    }
+  }
+}

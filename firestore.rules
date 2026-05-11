@@ -1,0 +1,87 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Allow connectivity check
+    match /test/connection {
+      allow read: if true;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(resource) {
+      return isSignedIn() && resource.data.ownerId == request.auth.uid;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Validations ---
+    function isValidProduct(data, productId) {
+      return data.keys().hasAll(['id', 'ownerId', 'name', 'price', 'stock']) &&
+             data.id == productId &&
+             data.ownerId == request.auth.uid &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.price is number && data.price >= 0 &&
+             data.stock is number;
+    }
+
+    function isValidCustomer(data, customerId) {
+      return data.keys().hasAll(['id', 'ownerId', 'name', 'balance']) &&
+             data.id == customerId &&
+             data.ownerId == request.auth.uid &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.balance is number;
+    }
+
+    function isValidTransaction(data, transactionId) {
+      return data.keys().hasAll(['id', 'ownerId', 'type', 'amount', 'createdAt']) &&
+             data.id == transactionId &&
+             data.ownerId == request.auth.uid &&
+             data.type in ['sale', 'received', 'given'] &&
+             data.amount is number && data.amount >= 0 &&
+             data.createdAt is string;
+    }
+
+    function isValidSettings(data, userId) {
+      return data.ownerId == request.auth.uid;
+    }
+
+    // --- Matches ---
+
+    match /products/{productId} {
+      allow read: if isSignedIn() && (resource == null || resource.data.ownerId == request.auth.uid);
+      allow write: if isSignedIn() && (request.resource == null || request.resource.data.ownerId == request.auth.uid);
+    }
+
+    match /customers/{customerId} {
+      allow read: if isSignedIn() && (resource == null || resource.data.ownerId == request.auth.uid);
+      allow write: if isSignedIn() && (request.resource == null || request.resource.data.ownerId == request.auth.uid);
+    }
+
+    match /transactions/{transactionId} {
+      allow read: if isSignedIn() && (resource == null || resource.data.ownerId == request.auth.uid);
+      allow write: if isSignedIn() && (request.resource == null || request.resource.data.ownerId == request.auth.uid);
+    }
+
+    match /settings/{userId} {
+      allow read, write: if isSignedIn() && userId == request.auth.uid;
+    }
+  }
+}

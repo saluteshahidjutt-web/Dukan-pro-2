@@ -1,0 +1,12 @@
+{
+  "name": "Dukan Pro",
+  "description": "Come to Dukaan Pro and become digital. A professional POS and Udhar management app for small shopkeepers.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "POS System",
+    "Customer Management",
+    "Inventory Control"
+  ]
+}
