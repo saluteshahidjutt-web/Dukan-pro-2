@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Barcode, Trash2, Minus, Plus, Users, CreditCard, ShoppingCart, CheckCircle2, MessageCircle, ChevronRight, Wallet, Printer, Send, Camera, Download, Share2, ReceiptText, RefreshCcw } from 'lucide-react';
+import { Search, Trash2, Minus, Plus, Users, CreditCard, ShoppingCart, CheckCircle2, MessageCircle, ChevronRight, Wallet, Printer, Send, Download, Share2, ReceiptText, RefreshCcw } from 'lucide-react';
 import * as htmlToImage from 'html-to-image';
 import { Product, Customer, Transaction, ShopSettings } from '../types';
 import { formatCurrency, generateId, cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
-import { BarcodeScanner } from './BarcodeScanner';
 import { FirestoreService } from '../lib/firestoreService';
 
 import { translations, Language } from '../lib/translations';
@@ -37,8 +36,6 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
   const [isCapturing, setIsCapturing] = useState(false);
   const receiptRef = React.useRef<HTMLDivElement>(null);
   const [currentTransaction, setCurrentTransaction] = useState<Transaction | null>(null);
-  const [isScannerOpen, setIsScannerOpen] = useState(false);
-  const [lastScannedCode, setLastScannedCode] = useState<string | null>(null);
 
   const t = translations[settings.language as Language || 'en'];
 
@@ -82,56 +79,61 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
       return;
     }
 
-    const transactionId = generateId();
-    const transaction: Transaction = {
-      id: transactionId,
-      type: 'sale',
-      amount: total,
-      description: `Sale - ${cart.length} items (${paymentType})`,
-      items: cart.map(item => ({ productId: item.id, quantity: item.quantity, price: item.price })),
-      createdAt: new Date().toISOString(),
-      paymentMethod: paymentType
-    };
+    try {
+      const transactionId = generateId();
+      const transaction: Transaction = {
+        id: transactionId,
+        type: 'sale',
+        amount: total,
+        description: `${cart.map(item => item.name).join(', ')} (${paymentType})`,
+        items: cart.map(item => ({ productId: item.id, quantity: item.quantity, price: item.price })),
+        createdAt: new Date().toISOString(),
+        paymentMethod: paymentType
+      };
 
-    if (selectedCustomer) {
-      transaction.customerId = selectedCustomer.id;
-    } else if (tempCustomer) {
-      transaction.customerName = tempCustomer.name;
-      transaction.customerPhone = tempCustomer.phone;
-    }
+      if (selectedCustomer) {
+        transaction.customerId = selectedCustomer.id;
+      } else if (tempCustomer) {
+        transaction.customerName = tempCustomer.name;
+        transaction.customerPhone = tempCustomer.phone;
+      }
 
-    // 1. Save Transaction
-    await FirestoreService.saveTransaction(transaction);
+      // 1. Save Transaction
+      await FirestoreService.saveTransaction(transaction);
 
-    // 2. Update Product Stocks
-    for (const item of cart) {
-      const product = products.find(p => p.id === item.id);
-      if (product) {
-        await FirestoreService.updateProduct(item.id, {
-          stock: product.stock - item.quantity
+      // 2. Update Product Stocks
+      for (const item of cart) {
+        const product = products.find(p => p.id === item.id);
+        if (product) {
+          await FirestoreService.updateProduct(item.id, {
+            stock: product.stock - item.quantity
+          });
+        }
+      }
+
+      // 3. Update Customer Balance if Udhar
+      if (paymentType === 'udhar' && selectedCustomer) {
+        await FirestoreService.updateCustomer(selectedCustomer.id, {
+          balance: (parseFloat(selectedCustomer.balance as any) || 0) + total,
+          lastTransactionAt: new Date().toISOString()
         });
       }
-    }
 
-    // 3. Update Customer Balance if Udhar
-    if (paymentType === 'udhar' && selectedCustomer) {
-      await FirestoreService.updateCustomer(selectedCustomer.id, {
-        balance: selectedCustomer.balance + total,
-        lastTransactionAt: new Date().toISOString()
-      });
-    }
+      // Play Sound
+      try {
+        const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2013/2013-preview.mp3');
+        audio.volume = 0.5;
+        audio.play();
+      } catch (e) {
+        console.warn('Audio play failed', e);
+      }
 
-    // Play Sound
-    try {
-      const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2013/2013-preview.mp3');
-      audio.volume = 0.5;
-      audio.play();
-    } catch (e) {
-      console.warn('Audio play failed', e);
+      setCurrentTransaction(transaction);
+      setIsReceiptOpen(true);
+    } catch (error) {
+      console.error('Checkout error:', error);
+      alert('Checkout fail ho gaya. Please check your internet or try again.');
     }
-
-    setCurrentTransaction(transaction);
-    setIsReceiptOpen(true);
   };
 
   const captureReceipt = async () => {
@@ -191,34 +193,6 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
     } finally {
       setIsCapturing(false);
     }
-  };
-
-  const handleBarcodeScan = (code: string) => {
-    if (code === lastScannedCode) return; // Prevent double scans
-    setLastScannedCode(code);
-    
-    const product = products.find(p => p.barcode === code);
-    if (product) {
-      addToCart(product);
-      // Visual feedback
-      const alertDiv = document.createElement('div');
-      alertDiv.className = 'fixed top-20 left-1/2 -translate-x-1/2 bg-emerald-600 text-white px-6 py-3 rounded-2xl shadow-xl z-[200] font-bold animate-bounce';
-      alertDiv.innerText = `Added: ${product.name}`;
-      document.body.appendChild(alertDiv);
-      setTimeout(() => alertDiv.remove(), 2000);
-      
-      if ('vibrate' in navigator) navigator.vibrate(100);
-    } else {
-      // Unrecognized barcode feedback
-      const alertDiv = document.createElement('div');
-      alertDiv.className = 'fixed top-20 left-1/2 -translate-x-1/2 bg-rose-600 text-white px-6 py-3 rounded-2xl shadow-xl z-[200] font-bold';
-      alertDiv.innerText = `Unknown Product: ${code}`;
-      document.body.appendChild(alertDiv);
-      setTimeout(() => alertDiv.remove(), 2000);
-    }
-    
-    // Timeout to allow same code again after a short delay
-    setTimeout(() => setLastScannedCode(null), 2000);
   };
 
   const importFromContacts = async () => {
@@ -298,15 +272,9 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
           <input 
             type="text" placeholder={t.search_product} 
-            className="w-full bg-white border border-slate-200 rounded-xl py-3 pl-10 pr-12 text-sm shadow-sm"
+            className="w-full bg-white border border-slate-200 rounded-xl py-3 pl-10 pr-4 text-sm shadow-sm"
             value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
           />
-          <button 
-            onClick={() => setIsScannerOpen(true)}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-600 p-1 bg-emerald-50 rounded-lg active:scale-95"
-          >
-            <Camera size={20} />
-          </button>
         </div>
         <div className="flex items-center gap-2">
           <button 
@@ -318,7 +286,7 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
           {selectedCustomer && (
             <button 
               onClick={() => setSelectedCustomer(null)}
-              className="p-3 bg-rose-50 text-rose-600 rounded-xl border border-rose-100 active:scale-95 transition-all"
+              className="p-3 bg-red-50 text-red-600 rounded-xl border border-red-100 active:scale-95 transition-all"
             >
               <RefreshCcw size={16} />
             </button>
@@ -329,9 +297,21 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
       <div className="flex-1 flex flex-col md:flex-row gap-4 overflow-hidden">
         <div className="flex-1 overflow-y-auto space-y-2 no-scrollbar">
           {filteredProducts.map(p => (
-            <button key={p.id} onClick={() => addToCart(p)} className="w-full bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-100 dark:border-slate-800 flex justify-between items-center shadow-sm active:bg-slate-50 transition-colors">
-              <div className="text-left font-bold text-sm text-slate-900 dark:text-white">{p.name} <span className="text-[10px] text-slate-400 font-normal">({p.stock})</span></div>
-              <div className="font-black text-emerald-600 dark:text-emerald-400">{formatCurrency(p.price)}</div>
+            <button key={p.id} onClick={() => addToCart(p)} className="w-full bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-slate-100 dark:border-slate-800 flex justify-between items-center shadow-sm active:bg-slate-50 transition-colors">
+              <div className="flex items-center gap-3">
+                {p.image ? (
+                  <img src={p.image} alt={p.name} className="h-10 w-10 object-cover rounded-lg" referrerPolicy="no-referrer" />
+                ) : (
+                   <div className="h-10 w-10 bg-slate-100 dark:bg-slate-800 rounded-lg flex items-center justify-center">
+                      <ShoppingCart size={16} className="text-slate-300" />
+                   </div>
+                )}
+                <div className="text-left">
+                  <p className="font-bold text-sm text-slate-900 dark:text-white leading-tight">{p.name}</p>
+                  <p className="text-[10px] text-slate-400 font-medium">{p.category} • {t.stock}: {p.stock}</p>
+                </div>
+              </div>
+              <div className="font-black text-emerald-600 dark:text-emerald-400 text-sm">{formatCurrency(p.price)}</div>
             </button>
           ))}
         </div>
@@ -340,14 +320,17 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
           <div className="flex-1 overflow-y-auto space-y-2 no-scrollbar">
             {cart.map(item => (
               <div key={item.id} className="bg-white dark:bg-slate-900 p-2 rounded-lg flex justify-between items-center shadow-sm">
-                <div className="flex-1 min-w-0 pr-2"><p className="text-xs font-bold truncate text-slate-900 dark:text-white">{item.name}</p></div>
+                <div className="flex-1 min-w-0 pr-2">
+                  <p className="text-xs font-bold truncate text-slate-900 dark:text-white">{item.name}</p>
+                  <p className="text-[9px] font-black text-emerald-600">{formatCurrency(item.price)}</p>
+                </div>
                 <div className="flex items-center gap-2">
                   <div className="flex items-center bg-slate-50 dark:bg-slate-800 rounded h-7">
                     <button onClick={() => updateQuantity(item.id, -1)} className="px-1.5 text-slate-500"><Minus size={12}/></button>
                     <span className="text-xs font-black w-4 text-center text-slate-900 dark:text-white">{item.quantity}</span>
                     <button onClick={() => updateQuantity(item.id, 1)} className="px-1.5 text-slate-500"><Plus size={12}/></button>
                   </div>
-                  <button onClick={() => removeFromCart(item.id)} className="text-rose-400"><Trash2 size={14}/></button>
+                  <button onClick={() => removeFromCart(item.id)} className="text-red-500 hover:text-red-600 transition-colors"><Trash2 size={14}/></button>
                 </div>
               </div>
             ))}
@@ -375,7 +358,7 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
                 onClick={() => setPaymentType('jazzcash')} 
                 className={cn(
                    "py-2 rounded-lg border font-black text-[9px] transition-all", 
-                   paymentType === 'jazzcash' ? "bg-rose-600 text-white border-rose-600" : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 dark:border-slate-800"
+                   paymentType === 'jazzcash' ? "bg-amber-600 text-white border-amber-600" : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 dark:border-slate-800"
                 )}
               >JAZZCASH</button>
               <button 
@@ -419,12 +402,6 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
       </div>
 
       <AnimatePresence>
-        {isScannerOpen && (
-          <BarcodeScanner 
-            onScan={handleBarcodeScan} 
-            onClose={() => setIsScannerOpen(false)} 
-          />
-        )}
         {isCustomerModalOpen && (
           <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
             <motion.div 
@@ -481,7 +458,7 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
                               </div>
                               <div className={cn(
                                 "text-xs font-black px-2 py-1 rounded-lg",
-                                c.balance > 0 ? "bg-rose-50 text-rose-600" : "bg-emerald-50 text-emerald-600"
+                                c.balance > 0 ? "bg-amber-50 text-amber-600" : "bg-emerald-50 text-emerald-600"
                               )}>
                                 {formatCurrency(c.balance)}
                               </div>
@@ -605,9 +582,12 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
                   <h2 className="text-2xl font-black text-[#0f172a] leading-tight uppercase">{settings.name}</h2>
                   <div className="text-[10px] text-[#64748b] font-bold uppercase tracking-widest flex flex-col items-center gap-1">
                     <span>{settings.phone}</span>
+                    {settings.address && (
+                      <span className="text-[9px] lowercase first-letter:uppercase text-[#94a3b8] italic max-w-[200px]">{settings.address}</span>
+                    )}
                     {(selectedCustomer || tempCustomer) && (
                       <div className="mt-1 px-3 py-1 bg-slate-100 text-slate-900 rounded-full text-[9px] font-black">
-                        GRAHAK: {(selectedCustomer || tempCustomer)?.name} {(selectedCustomer || tempCustomer)?.phone ? `(${ (selectedCustomer || tempCustomer)?.phone })` : ''}
+                        CUSTOMER: {(selectedCustomer || tempCustomer)?.name} {(selectedCustomer || tempCustomer)?.phone ? `(${ (selectedCustomer || tempCustomer)?.phone })` : ''}
                       </div>
                     )}
                     <div className="w-8 h-0.5 bg-[#f1f5f9]" />
@@ -619,11 +599,16 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
                   <div className="space-y-4">
                     {cart.map(item => (
                       <div key={item.id} className="flex justify-between items-start gap-4">
-                        <div className="flex-1">
-                          <p className="text-xs font-black text-[#1e293b] uppercase leading-none mb-1">{item.name}</p>
-                          <p className="text-[10px] text-[#94a3b8] font-bold">
-                            {item.quantity} x {formatCurrency(item.price)}
-                          </p>
+                        <div className="flex gap-2 flex-1">
+                          {item.image && (
+                            <img src={item.image} alt={item.name} className="h-10 w-10 object-cover rounded shadow-sm border border-slate-50" referrerPolicy="no-referrer" />
+                          )}
+                          <div>
+                            <p className="text-xs font-black text-[#1e293b] uppercase leading-none mb-1">{item.name}</p>
+                            <p className="text-[10px] text-[#94a3b8] font-bold">
+                              {item.quantity} x {formatCurrency(item.price)}
+                            </p>
+                          </div>
                         </div>
                         <p className="text-xs font-black text-[#0f172a]">
                           {formatCurrency(item.price * item.quantity)}
@@ -651,10 +636,9 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
                 </div>
 
                 <div className="text-center space-y-4 py-4">
-                  <div className="flex justify-center">
-                    <div className="border-2 border-[#0f172a] p-1 rounded-lg">
-                      <Barcode size={32} color="#0f172a" />
-                    </div>
+                  <div className="flex justify-center flex-col items-center gap-1 opacity-20">
+                    <ShoppingCart size={32} color="#0f172a" />
+                    <span className="text-[8px] font-black uppercase tracking-[0.2em]">Verified Transaction</span>
                   </div>
                   <p className="text-[10px] font-black text-[#1e293b] uppercase tracking-widest">
                     Receipt #{currentTransaction?.id?.slice(-8).toUpperCase()}

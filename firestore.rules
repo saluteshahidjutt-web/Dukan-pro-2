@@ -16,10 +16,6 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function isOwner(resource) {
-      return isSignedIn() && resource.data.ownerId == request.auth.uid;
-    }
-
     function isValidId(id) {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
@@ -33,55 +29,116 @@ service cloud.firestore {
     }
 
     // --- Validations ---
-    function isValidProduct(data, productId) {
+
+    function isValidProduct(data) {
       return data.keys().hasAll(['id', 'ownerId', 'name', 'price', 'stock']) &&
-             data.id == productId &&
+             data.keys().size() <= 12 && // Strict key count to prevent shadow fields
              data.ownerId == request.auth.uid &&
-             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 200 &&
              data.price is number && data.price >= 0 &&
-             data.stock is number;
+             data.stock is number &&
+             (data.get('category', '') is string) &&
+             (data.get('barcode', '') is string) &&
+             (data.get('image', '') is string) &&
+             (data.get('unit', '') is string) &&
+             (data.get('minStock', 0) is number);
     }
 
-    function isValidCustomer(data, customerId) {
+    function isValidCustomer(data) {
       return data.keys().hasAll(['id', 'ownerId', 'name', 'balance']) &&
-             data.id == customerId &&
+             data.keys().size() <= 10 &&
              data.ownerId == request.auth.uid &&
-             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
-             data.balance is number;
+             data.name is string && data.name.size() > 0 && data.name.size() <= 200 &&
+             data.balance is number &&
+             (data.get('phone', '') is string) &&
+             (data.get('updatedAt', '') is string) &&
+             (data.get('lastTransactionAt', '') is string);
     }
 
-    function isValidTransaction(data, transactionId) {
+    function isValidTransaction(data) {
       return data.keys().hasAll(['id', 'ownerId', 'type', 'amount', 'createdAt']) &&
-             data.id == transactionId &&
+             data.keys().size() <= 17 &&
              data.ownerId == request.auth.uid &&
-             data.type in ['sale', 'received', 'given'] &&
+             data.type in ['sale', 'payment', 'credit', 'payment_received', 'credit_given', 'return'] &&
              data.amount is number && data.amount >= 0 &&
-             data.createdAt is string;
+             data.createdAt is string &&
+             (data.get('description', '') is string) &&
+             (data.get('customerId', '') is string) &&
+             (data.get('paymentMethod', '') is string) &&
+             (data.get('items', []) is list) &&
+             (data.get('isDeleted', false) is bool) &&
+             (data.get('deletedAt', '') is string);
     }
 
-    function isValidSettings(data, userId) {
-      return data.ownerId == request.auth.uid;
+    function isValidSettings(data) {
+      return data.keys().hasAll(['ownerId', 'name']) &&
+             data.ownerId == request.auth.uid &&
+             data.name is string && data.name.size() <= 200 &&
+             (data.get('phone', '') is string) &&
+             (data.get('address', '') is string) &&
+             (data.get('currency', '') is string) &&
+             (data.get('language', '') is string) &&
+             (data.get('logoUrl', '') is string) &&
+             (data.get('ownerEmail', '') is string);
+    }
+
+    function isValidExpense(data) {
+      return data.keys().hasAll(['id', 'ownerId', 'amount', 'description', 'createdAt']) &&
+             data.keys().size() <= 8 &&
+             data.ownerId == request.auth.uid &&
+             data.amount is number && data.amount >= 0 &&
+             data.description is string && data.description.size() <= 1000 &&
+             data.createdAt is string &&
+             (data.get('category', '') is string) &&
+             (data.get('evidenceUrl', '') is string);
     }
 
     // --- Matches ---
 
     match /products/{productId} {
-      allow read: if isSignedIn() && (resource == null || resource.data.ownerId == request.auth.uid);
-      allow write: if isSignedIn() && (request.resource == null || request.resource.data.ownerId == request.auth.uid);
+      allow get: if isSignedIn() && (resource == null || resource.data.ownerId == request.auth.uid);
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(productId) && isValidProduct(incoming());
+      allow update: if isSignedIn() && isValidId(productId) && isValidProduct(incoming()) && 
+                       incoming().ownerId == existing().ownerId &&
+                       incoming().id == existing().id;
+      allow delete: if isSignedIn() && existing().ownerId == request.auth.uid;
     }
 
     match /customers/{customerId} {
-      allow read: if isSignedIn() && (resource == null || resource.data.ownerId == request.auth.uid);
-      allow write: if isSignedIn() && (request.resource == null || request.resource.data.ownerId == request.auth.uid);
+      allow get: if isSignedIn() && (resource == null || resource.data.ownerId == request.auth.uid);
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(customerId) && isValidCustomer(incoming());
+      allow update: if isSignedIn() && isValidId(customerId) && isValidCustomer(incoming()) && 
+                       incoming().ownerId == existing().ownerId &&
+                       incoming().id == existing().id;
+      allow delete: if isSignedIn() && existing().ownerId == request.auth.uid;
     }
 
     match /transactions/{transactionId} {
-      allow read: if isSignedIn() && (resource == null || resource.data.ownerId == request.auth.uid);
-      allow write: if isSignedIn() && (request.resource == null || request.resource.data.ownerId == request.auth.uid);
+      allow get: if isSignedIn() && (resource == null || resource.data.ownerId == request.auth.uid);
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(transactionId) && isValidTransaction(incoming());
+      allow update: if isSignedIn() && isValidId(transactionId) && isValidTransaction(incoming()) && 
+                       incoming().ownerId == existing().ownerId &&
+                       incoming().id == existing().id &&
+                       incoming().diff(existing()).affectedKeys().hasOnly(['isDeleted', 'deletedAt']);
+      allow delete: if isSignedIn() && existing().ownerId == request.auth.uid;
+    }
+
+    match /expenses/{expenseId} {
+      allow get: if isSignedIn() && (resource == null || resource.data.ownerId == request.auth.uid);
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(expenseId) && isValidExpense(incoming());
+      allow update: if isSignedIn() && isValidId(expenseId) && isValidExpense(incoming()) && 
+                       incoming().ownerId == existing().ownerId &&
+                       incoming().id == existing().id;
+      allow delete: if isSignedIn() && existing().ownerId == request.auth.uid;
     }
 
     match /settings/{userId} {
-      allow read, write: if isSignedIn() && userId == request.auth.uid;
+      allow get: if isSignedIn() && userId == request.auth.uid;
+      allow write: if isSignedIn() && userId == request.auth.uid && isValidSettings(incoming());
     }
   }
 }

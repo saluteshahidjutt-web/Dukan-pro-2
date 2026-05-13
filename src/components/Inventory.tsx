@@ -1,9 +1,8 @@
 import React, { useState } from 'react';
-import { Search, Plus, Barcode, Trash2, Camera, MoreVertical, Edit2, AlertCircle, Package } from 'lucide-react';
+import { Search, Plus, Trash2, Image as ImageIcon, MoreVertical, Edit2, AlertCircle, Package } from 'lucide-react';
 import { Product, ShopSettings } from '../types';
 import { formatCurrency, generateId, cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
-import { BarcodeScanner } from './BarcodeScanner';
 import { ConfirmModal } from './ConfirmModal';
 import { FirestoreService } from '../lib/firestoreService';
 
@@ -19,22 +18,52 @@ export function Inventory({ products, setProducts, settings }: InventoryProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [isAddingProduct, setIsAddingProduct] = useState(false);
   const [editProduct, setEditProduct] = useState<Product | null>(null);
-  const [isScannerOpen, setIsScannerOpen] = useState(false);
-  const [scannerTarget, setScannerTarget] = useState<'search' | 'field'>('search');
   const [deletingProductId, setDeletingProductId] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+
+  // Sync local sub-views with browser history for Back Button support
+  React.useEffect(() => {
+    const handlePopState = () => {
+      if (isAddingProduct) {
+        setIsAddingProduct(false);
+        setEditProduct(null);
+      }
+    };
+
+    if (isAddingProduct) {
+      window.history.pushState({ subview: true }, '');
+      window.addEventListener('popstate', handlePopState);
+    }
+
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [isAddingProduct]);
 
   const t = translations[settings.language as Language || 'en'];
 
   const [newProduct, setNewProduct] = useState<Partial<Product>>({
     name: '',
     category: 'Grocery',
-    price: 0,
-    purchasePrice: 0,
-    stock: 0,
+    price: undefined,
+    purchasePrice: undefined,
+    stock: undefined,
     barcode: '',
-    lowStockThreshold: 5
+    image: '',
+    lowStockThreshold: undefined
   });
+
+  const resetForm = () => {
+    setNewProduct({
+      name: '',
+      category: 'Grocery',
+      price: undefined,
+      purchasePrice: undefined,
+      stock: undefined,
+      barcode: '',
+      image: '',
+      lowStockThreshold: 5
+    });
+    setEditProduct(null);
+  };
 
   const filteredProducts = products.filter(p => 
     p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
@@ -58,16 +87,24 @@ export function Inventory({ products, setProducts, settings }: InventoryProps) {
           purchasePrice: Number(newProduct.purchasePrice),
           stock: Number(newProduct.stock),
           barcode: newProduct.barcode || generateId(),
-          lowStockThreshold: Number(newProduct.lowStockThreshold)
+          image: newProduct.image || '',
+          lowStockThreshold: Number(newProduct.lowStockThreshold) || 5
         };
         await FirestoreService.saveProduct(product);
       }
 
       setIsAddingProduct(false);
-      setEditProduct(null);
-      setNewProduct({
-        name: '', category: 'Grocery', price: 0, purchasePrice: 0, stock: 0, barcode: '', lowStockThreshold: 5
-      });
+      resetForm();
+
+      // Success Feedback
+      const alertDiv = document.createElement('div');
+      alertDiv.className = 'fixed top-20 left-1/2 -translate-x-1/2 bg-emerald-600 text-white px-8 py-4 rounded-[20px] shadow-2xl z-[200] font-black uppercase tracking-widest animate-bounce text-sm';
+      alertDiv.innerText = editProduct ? 'Stock Updated / Maal Update Ho Gaya!' : 'Product Added / Maal Jama Ho Gaya!';
+      document.body.appendChild(alertDiv);
+      setTimeout(() => alertDiv.remove(), 2500);
+    } catch (error) {
+      console.error(error);
+      alert("Ghalti: Stock save nahi hua. Internet check karein.");
     } finally {
       setIsProcessing(false);
     }
@@ -90,19 +127,39 @@ export function Inventory({ products, setProducts, settings }: InventoryProps) {
     setIsAddingProduct(true);
   };
 
-  const handleBarcodeScan = (code: string) => {
-    if (scannerTarget === 'search') {
-      setSearchQuery(code);
-    } else {
-      setNewProduct(prev => ({ ...prev, barcode: code }));
-      // Visual feedback
-      const alertDiv = document.createElement('div');
-      alertDiv.className = 'fixed top-20 left-1/2 -translate-x-1/2 bg-emerald-600 text-white px-6 py-3 rounded-2xl shadow-xl z-[200] font-bold animate-bounce';
-      alertDiv.innerText = `Barcode Scanned: ${code}`;
-      document.body.appendChild(alertDiv);
-      setTimeout(() => alertDiv.remove(), 2000);
-    }
-    setIsScannerOpen(false);
+  const compressImage = (base64Str: string): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.src = base64Str;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_WIDTH = 400;
+        if (img.width <= MAX_WIDTH) {
+           resolve(base64Str);
+           return;
+        }
+        const scaleSize = MAX_WIDTH / img.width;
+        canvas.width = MAX_WIDTH;
+        canvas.height = img.height * scaleSize;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { resolve(base64Str); return; }
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', 0.6));
+      };
+      img.onerror = () => resolve(base64Str);
+    });
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new window.FileReader();
+    reader.onloadend = async () => {
+      const compressed = await compressImage(reader.result as string);
+      setNewProduct(prev => ({ ...prev, image: compressed }));
+    };
+    reader.readAsDataURL(file);
   };
 
   return (
@@ -114,19 +171,13 @@ export function Inventory({ products, setProducts, settings }: InventoryProps) {
           <input 
             type="text" 
             placeholder={t.search_product} 
-            className="w-full bg-white border border-slate-200 rounded-xl py-3 pl-10 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all shadow-sm"
+            className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl py-3 pl-10 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all shadow-sm dark:text-white"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
-          <button 
-            onClick={() => { setScannerTarget('search'); setIsScannerOpen(true); }}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-600 p-1 rounded-lg active:scale-95"
-          >
-            <Camera size={18} />
-          </button>
         </div>
         <button 
-          onClick={() => setIsAddingProduct(true)}
+          onClick={() => { resetForm(); setIsAddingProduct(true); }}
           className="bg-slate-900 text-white p-3 rounded-xl shadow-lg shadow-slate-100 active:scale-95 transition-transform"
         >
           <Plus size={20} />
@@ -152,12 +203,16 @@ export function Inventory({ products, setProducts, settings }: InventoryProps) {
               <div key={product.id} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 flex items-center justify-between group shadow-sm transition-all">
                 <div className="flex items-center gap-3">
                   <div className={cn(
-                    "h-12 w-12 rounded-xl flex items-center justify-center font-bold",
+                    "h-12 w-12 rounded-xl flex items-center justify-center font-bold overflow-hidden border border-slate-100 dark:border-slate-800",
                     product.stock <= product.lowStockThreshold 
-                      ? "bg-rose-50 text-rose-500 dark:bg-rose-900/20 dark:text-rose-400" 
+                      ? "bg-amber-50 text-amber-500 dark:bg-amber-900/20 dark:text-amber-400" 
                       : "bg-slate-50 text-slate-400 dark:bg-slate-800 dark:text-slate-500"
                   )}>
-                    {product.name.charAt(0)}
+                    {product.image ? (
+                      <img src={product.image} alt={product.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                    ) : (
+                      product.name.charAt(0)
+                    )}
                   </div>
                   <div>
                     <h4 className="font-bold text-slate-900 dark:text-white text-sm leading-tight">{product.name}</h4>
@@ -168,7 +223,7 @@ export function Inventory({ products, setProducts, settings }: InventoryProps) {
                     <div className="flex items-center gap-2 mt-1">
                        <span className={cn(
                          "text-[9px] font-black uppercase px-1 rounded",
-                         profit > 0 ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400" : "bg-rose-50 text-rose-600 dark:bg-rose-900/20 dark:text-rose-400"
+                         profit > 0 ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400" : "bg-amber-50 text-amber-600 dark:bg-amber-900/20 dark:text-amber-400"
                        )}>
                          Profit: {formatCurrency(profit)}
                        </span>
@@ -177,7 +232,7 @@ export function Inventory({ products, setProducts, settings }: InventoryProps) {
                        </span>
                     </div>
                     {product.stock <= product.lowStockThreshold && (
-                      <div className="flex items-center gap-1 text-[9px] text-rose-600 dark:text-rose-400 font-bold mt-1">
+                      <div className="flex items-center gap-1 text-[9px] text-amber-600 dark:text-amber-400 font-bold mt-1">
                         <AlertCircle size={10} />
                         Low Stock / Maal Kam Hai
                       </div>
@@ -189,7 +244,7 @@ export function Inventory({ products, setProducts, settings }: InventoryProps) {
                     <p className="font-black text-slate-900 dark:text-white">{formatCurrency(product.price, settings.currency)}</p>
                     <p className={cn(
                       "text-[10px] font-bold uppercase",
-                      product.stock <= product.lowStockThreshold ? "text-rose-600 dark:text-rose-400" : "text-emerald-600 dark:text-emerald-400"
+                      product.stock <= product.lowStockThreshold ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"
                     )}>
                       Stock: {product.stock}
                     </p>
@@ -203,7 +258,7 @@ export function Inventory({ products, setProducts, settings }: InventoryProps) {
                     </button>
                      <button 
                       onClick={() => setDeletingProductId(product.id)}
-                      className="p-1 px-2 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded"
+                      className="p-1 px-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
                     >
                       <Trash2 size={16} />
                     </button>
@@ -217,12 +272,6 @@ export function Inventory({ products, setProducts, settings }: InventoryProps) {
 
       {/* Add/Edit Product Modal */}
       <AnimatePresence>
-        {isScannerOpen && (
-          <BarcodeScanner 
-            onScan={handleBarcodeScan} 
-            onClose={() => setIsScannerOpen(false)} 
-          />
-        )}
         {isAddingProduct && (
           <motion.div 
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -230,13 +279,13 @@ export function Inventory({ products, setProducts, settings }: InventoryProps) {
           >
             <motion.div 
               initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
-              className="bg-white w-full max-w-md rounded-t-[32px] sm:rounded-3xl p-6 pb-safe overflow-y-auto max-h-[90vh]"
+              className="bg-white dark:bg-slate-900 w-full max-w-md rounded-t-[32px] sm:rounded-3xl p-6 pb-24 sm:pb-6 overflow-y-auto max-h-[95vh] no-scrollbar"
             >
               <div className="flex justify-between items-center mb-6">
-                <h3 className="text-xl font-black">{editProduct ? 'Edit Product' : 'New Product / Naya Maal'}</h3>
+                <h3 className="text-xl font-black dark:text-white">{editProduct ? 'Edit Product' : 'New Product / Naya Maal'}</h3>
                 <button 
-                  onClick={() => {setIsAddingProduct(false); setEditProduct(null);}}
-                  className="bg-slate-100 text-slate-500 p-2 rounded-full"
+                  onClick={() => {setIsAddingProduct(false); resetForm();}}
+                  className="bg-slate-100 dark:bg-slate-800 text-slate-500 p-2 rounded-full"
                 >
                   <Plus className="rotate-45" size={20} />
                 </button>
@@ -249,7 +298,7 @@ export function Inventory({ products, setProducts, settings }: InventoryProps) {
                     <input 
                       required
                       type="text" 
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                      className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-800 rounded-xl py-3 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
                       placeholder="Enter product name"
                       value={newProduct.name}
                       onChange={(e) => setNewProduct({...newProduct, name: e.target.value})}
@@ -258,7 +307,7 @@ export function Inventory({ products, setProducts, settings }: InventoryProps) {
                   <div>
                     <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Category</label>
                     <select 
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm focus:outline-none"
+                      className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-800 rounded-xl py-3 px-4 text-sm focus:outline-none"
                       value={newProduct.category}
                       onChange={(e) => setNewProduct({...newProduct, category: e.target.value})}
                     >
@@ -271,33 +320,62 @@ export function Inventory({ products, setProducts, settings }: InventoryProps) {
                       <option>Other</option>
                     </select>
                   </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Barcode</label>
-                    <div className="relative">
-                      <input 
-                        type="text" 
-                        className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-4 pr-10 text-sm focus:outline-none"
-                        placeholder="Scan or Type"
-                        value={newProduct.barcode}
-                        onChange={(e) => setNewProduct({...newProduct, barcode: e.target.value})}
-                      />
-                      <button 
-                        type="button"
-                        onClick={() => { setScannerTarget('field'); setIsScannerOpen(true); }}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-emerald-600"
-                      >
-                        <Camera size={18} />
-                      </button>
+                  <div className="col-span-2">
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Product Image</label>
+                    <div className="grid grid-cols-2 gap-3">
+                      <label className="h-[46px] bg-slate-50 dark:bg-slate-800/50 rounded-xl flex items-center justify-center border-2 border-dashed border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+                        <input 
+                          type="file" 
+                          accept="image/*"
+                          capture="environment"
+                          className="hidden" 
+                          onChange={handleFileChange}
+                        />
+                         <div className="flex items-center gap-1.5 text-slate-500 font-bold text-[9px] uppercase tracking-widest">
+                           <Plus size={14} className="text-emerald-500" />
+                           Camera
+                         </div>
+                      </label>
+                      <label className="h-[46px] bg-slate-50 dark:bg-slate-800/50 rounded-xl flex items-center justify-center border-2 border-dashed border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+                        <input 
+                          type="file" 
+                          accept="image/*"
+                          className="hidden" 
+                          onChange={handleFileChange}
+                        />
+                         <div className="flex items-center gap-1.5 text-slate-500 font-bold text-[9px] uppercase tracking-widest">
+                           <ImageIcon size={14} className="text-blue-500" />
+                           Gallery
+                         </div>
+                      </label>
                     </div>
+                    {newProduct.image && (
+                      <div className="mt-2 flex items-center justify-between bg-emerald-50 dark:bg-emerald-900/20 p-2 rounded-xl border border-emerald-100 dark:border-emerald-800">
+                        <div className="flex items-center gap-3">
+                          <img src={newProduct.image} alt="Preview" className="h-10 w-10 object-cover rounded-lg shadow-sm" referrerPolicy="no-referrer" />
+                          <div>
+                            <p className="text-[10px] font-black text-emerald-700 dark:text-emerald-400 uppercase leading-none">Photo Selected</p>
+                            <p className="text-[8px] font-bold text-emerald-600/60 dark:text-emerald-400/60 uppercase mt-1">Compressed & Optimized</p>
+                          </div>
+                        </div>
+                        <button 
+                          type="button"
+                          onClick={() => setNewProduct({...newProduct, image: ''})}
+                          className="text-amber-500 p-2 hover:bg-amber-100 dark:hover:bg-amber-900/40 rounded-full transition-colors"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    )}
                   </div>
                   <div>
                     <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Daily Price (Sale)</label>
                     <input 
                       required
                       type="number" 
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm font-black focus:outline-none"
+                      className="w-full bg-slate-50 dark:bg-slate-800/50 dark:text-white border border-slate-200 dark:border-slate-800 rounded-xl py-3 px-4 text-sm font-black focus:outline-none"
                       placeholder="0"
-                      value={newProduct.price}
+                      value={newProduct.price ?? ''}
                       onChange={(e) => setNewProduct({...newProduct, price: Number(e.target.value)})}
                     />
                   </div>
@@ -305,19 +383,19 @@ export function Inventory({ products, setProducts, settings }: InventoryProps) {
                     <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Buy Price (Cost)</label>
                     <input 
                       type="number" 
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm focus:outline-none"
+                      className="w-full bg-slate-50 dark:bg-slate-800/50 dark:text-white border border-slate-200 dark:border-slate-800 rounded-xl py-3 px-4 text-sm focus:outline-none"
                       placeholder="0"
-                      value={newProduct.purchasePrice}
+                      value={newProduct.purchasePrice ?? ''}
                       onChange={(e) => setNewProduct({...newProduct, purchasePrice: Number(e.target.value)})}
                     />
                   </div>
                   <div>
-                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Stock Quantity</label>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Stock Qty</label>
                     <input 
                       type="number" 
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm font-bold text-emerald-600 focus:outline-none"
+                      className="w-full bg-slate-50 dark:bg-slate-800/50 dark:text-white border border-slate-200 dark:border-slate-800 rounded-xl py-3 px-4 text-sm font-bold text-emerald-600 focus:outline-none"
                       placeholder="0"
-                      value={newProduct.stock}
+                      value={newProduct.stock ?? ''}
                       onChange={(e) => setNewProduct({...newProduct, stock: Number(e.target.value)})}
                     />
                   </div>
@@ -325,15 +403,15 @@ export function Inventory({ products, setProducts, settings }: InventoryProps) {
                     <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Low Stock Alert at</label>
                     <input 
                       type="number" 
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm focus:outline-none"
+                      className="w-full bg-slate-50 dark:bg-slate-800/50 dark:text-white border border-slate-200 dark:border-slate-800 rounded-xl py-3 px-4 text-sm focus:outline-none"
                       placeholder="5"
-                      value={newProduct.lowStockThreshold}
+                      value={newProduct.lowStockThreshold ?? ''}
                       onChange={(e) => setNewProduct({...newProduct, lowStockThreshold: Number(e.target.value)})}
                     />
                   </div>
                 </div>
 
-                <div className="flex gap-3 pt-6">
+                <div className="flex gap-3 pt-12">
                   <button 
                     type="button"
                     onClick={() => {setIsAddingProduct(false); setEditProduct(null);}}

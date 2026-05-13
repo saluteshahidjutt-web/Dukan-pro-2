@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import Papa from 'papaparse';
 import { ShopSettings } from '../types';
 import { Store, Phone, Languages, RefreshCcw, Lock, Shield, Moon, Sun, Image as ImageIcon, FileText, Cloud, LogIn, LogOut, Upload, Mail } from 'lucide-react';
 import { ConfirmModal } from './ConfirmModal';
@@ -15,10 +16,10 @@ interface SettingsProps {
 }
 
 export function Settings({ settings, setSettings }: SettingsProps) {
-  const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
   const [isPINSetupOpen, setIsPINSetupOpen] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   const t = translations[settings.language as Language || 'en'];
 
@@ -76,10 +77,23 @@ export function Settings({ settings, setSettings }: SettingsProps) {
     }
   };
 
+  const [signOutConfirm, setSignOutConfirm] = React.useState(false);
+
   const handleLogout = async () => {
-    if (confirm("Are you sure? Your data will not be backed up anymore.")) {
+    // We handle this via the ConfirmModal confirmation dialog at the end
+  };
+
+  const executeLogout = async () => {
+    try {
+      localStorage.removeItem('dukan_has_migrated');
+      localStorage.removeItem('dukan_products');
+      localStorage.removeItem('dukan_customers');
+      localStorage.removeItem('dukan_transactions');
+      localStorage.removeItem('dukan_settings');
       await signOut(auth);
       window.location.reload();
+    } catch (error) {
+      console.error("Logout failed:", error);
     }
   };
 
@@ -98,9 +112,189 @@ export function Settings({ settings, setSettings }: SettingsProps) {
     }
   };
 
-  const resetData = () => {
-    localStorage.clear();
-    window.location.reload();
+  const [isImporting, setIsImporting] = useState(false);
+
+  const handleExport = async () => {
+    try {
+      setIsImporting(true);
+      const data = {
+        products: await FirestoreService.getProducts(),
+        customers: await FirestoreService.getCustomers(),
+        transactions: await FirestoreService.getTransactions(),
+        expenses: await FirestoreService.getExpenses(),
+        settings: await FirestoreService.getSettings()
+      };
+      
+      // Flatten into a single array for CSV
+      const flatData = [
+        ...data.products.map(p => ({ _entityType: 'product', ...p })),
+        ...data.customers.map(c => ({ _entityType: 'customer', ...c })),
+        ...data.transactions.map(t => ({ _entityType: 'transaction', ...t, items: JSON.stringify(t.items) })),
+        ...data.expenses.map(e => ({ _entityType: 'expense', ...e })),
+        ...(data.settings ? [{ _entityType: 'settings', ...data.settings }] : [])
+      ];
+      
+      const allKeys = Array.from(new Set(flatData.flatMap(Object.keys)));
+      const normalizedData = flatData.map(row => {
+        const newRow: any = {};
+        allKeys.forEach(k => {
+          newRow[k] = (row as any)[k] === undefined ? '' : (row as any)[k];
+        });
+        return newRow;
+      });
+      
+      const csv = Papa.unparse(normalizedData);
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `dukan_backup_${new Date().toISOString()}.csv`;
+      link.click();
+    } catch (e) {
+      console.error("Export failed", e);
+      alert("Failed to export data");
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const userId = auth.currentUser?.uid;
+    if (!userId) {
+      alert("User not authenticated.");
+      return;
+    }
+
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: async (results) => {
+        try {
+          setIsImporting(true);
+          const resultsData = results.data as any[];
+          
+          for (const row of resultsData) {
+            const { _entityType, type, ...restData } = row;
+            // Detect entity type
+            let entity = _entityType;
+            if (!entity) {
+                if (['product', 'customer', 'expense', 'settings'].includes(type)) {
+                    entity = type;
+                } else if (['sale', 'credit_given', 'payment_received', 'payment', 'return', 'credit'].includes(type)) {
+                    entity = 'transaction';
+                }
+            }
+            
+            // Reconstruct data, because `type` belongs to transaction
+            const data = { ...restData, type };
+            
+            if (entity === 'product') {
+              const stock = parseFloat(data.stock);
+              const price = parseFloat(data.price);
+              const minStock = parseFloat(data.minStock);
+              const product: any = {
+                id: data.id,
+                ownerId: userId,
+                name: data.name || 'Untitled',
+                price: isNaN(price) ? 0 : price,
+                stock: isNaN(stock) ? 0 : stock,
+              };
+              if (data.category) product.category = data.category;
+              if (data.barcode) product.barcode = data.barcode;
+              if (data.image) product.image = data.image;
+              if (data.unit) product.unit = data.unit;
+              if (!isNaN(minStock)) product.minStock = minStock;
+              
+              await FirestoreService.saveProduct(product);
+            } else if (entity === 'customer') {
+              const balance = parseFloat(data.balance);
+              const customer: any = {
+                id: data.id,
+                ownerId: userId,
+                name: data.name || 'Unnamed',
+                balance: isNaN(balance) ? 0 : balance,
+              };
+              if (data.phone) customer.phone = data.phone;
+              if (data.updatedAt) customer.updatedAt = data.updatedAt;
+              if (data.lastTransactionAt) customer.lastTransactionAt = data.lastTransactionAt;
+              
+              await FirestoreService.saveCustomer(customer);
+            } else if (entity === 'transaction') {
+              const amount = parseFloat(data.amount);
+              const transaction: any = {
+                id: data.id,
+                ownerId: userId,
+                type: data.type || 'sale',
+                amount: isNaN(amount) ? 0 : amount,
+                createdAt: data.createdAt || new Date().toISOString(),
+              };
+              if (data.description) transaction.description = data.description;
+              if (data.customerId) transaction.customerId = data.customerId;
+              if (data.paymentMethod) transaction.paymentMethod = data.paymentMethod;
+              if (data.items) {
+                try { transaction.items = JSON.parse(data.items); } catch { transaction.items = []; }
+              }
+              if (data.isDeleted === 'true' || data.isDeleted === true) transaction.isDeleted = true;
+              if (data.deletedAt) transaction.deletedAt = data.deletedAt;
+              
+              await FirestoreService.saveTransaction(transaction);
+            } else if (entity === 'expense') {
+              const amount = parseFloat(data.amount);
+              const expense: any = {
+                id: data.id,
+                ownerId: userId,
+                amount: isNaN(amount) ? 0 : amount,
+                description: data.description || '',
+                createdAt: data.createdAt || new Date().toISOString(),
+              };
+              if (data.category && data.category !== '') expense.category = data.category;
+              if (data.evidenceUrl && data.evidenceUrl !== '') expense.evidenceUrl = data.evidenceUrl;
+              
+              await FirestoreService.saveExpense(expense);
+            } else if (entity === 'settings') {
+              const settingsData: any = { ...settings, ownerId: userId, name: data.name || settings.name || 'Shop' };
+              if (data.phone !== undefined && data.phone !== '') settingsData.phone = data.phone;
+              if (data.address !== undefined) settingsData.address = data.address;
+              if (data.currency !== undefined && data.currency !== '') settingsData.currency = data.currency;
+              if (data.language !== undefined && data.language !== '') settingsData.language = data.language;
+              if (data.logoUrl !== undefined && data.logoUrl !== '') settingsData.logoUrl = data.logoUrl;
+              if (data.ownerEmail !== undefined) settingsData.ownerEmail = data.ownerEmail;
+              await FirestoreService.saveSettings(settingsData);
+            }
+          }
+          
+          // Recalibrate Customer Balances based on all their transactions
+          const allCustomers = await FirestoreService.getCustomers();
+          const allTransactions = await FirestoreService.getTransactions();
+          
+          for (const customer of allCustomers) {
+            const customerTransactions = allTransactions.filter(t => t.customerId === customer.id && !t.isDeleted);
+            let calculatedBalance = 0;
+            for (const t of customerTransactions) {
+              if (t.type === 'payment_received' || t.type === 'payment' || t.type === 'return') {
+                calculatedBalance -= t.amount;
+              } else if (t.type === 'credit_given' || t.type === 'sale' || t.type === 'credit') {
+                calculatedBalance += t.amount;
+              }
+            }
+            if (customer.balance !== calculatedBalance) {
+                await FirestoreService.updateCustomer(customer.id, { balance: calculatedBalance });
+            }
+          }
+
+          alert("Import successful! Data has been merged.");
+          window.location.reload();
+        } catch (e) {
+          console.error("Import failed", e);
+          alert("Failed to import data");
+        } finally {
+          setIsImporting(false);
+          if (importInputRef.current) importInputRef.current.value = '';
+        }
+      }
+    });
   };
 
   const handlePINSetupComplete = (pinHash: string, securityQuestion: string, securityAnswerHash: string) => {
@@ -146,8 +340,8 @@ export function Settings({ settings, setSettings }: SettingsProps) {
           </div>
           {auth.currentUser ? (
             <button 
-              onClick={handleLogout}
-              className="bg-white/50 dark:bg-emerald-900/20 text-rose-600 p-2 rounded-xl hover:bg-rose-50 transition-colors"
+              onClick={() => setSignOutConfirm(true)}
+              className="bg-white/50 dark:bg-emerald-900/20 text-amber-600 p-2 rounded-xl hover:bg-amber-50 transition-colors"
             >
               <LogOut size={20} />
             </button>
@@ -293,6 +487,17 @@ export function Settings({ settings, setSettings }: SettingsProps) {
           </div>
 
           <div>
+            <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Shop Address / Dukaan Ka Pata</label>
+            <input 
+              type="text" 
+              className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl py-3 px-4 mt-1 text-sm font-bold dark:text-white focus:ring-2 focus:ring-slate-200 dark:focus:ring-slate-700"
+              placeholder="e.g. Shop #12, Market Name, City"
+              value={settings.address || ''}
+              onChange={(e) => setSettings({...settings, address: e.target.value})}
+            />
+          </div>
+
+          <div>
             <label className="text-[10px] font-bold text-slate-400 uppercase ml-1 flex items-center gap-1"><FileText size={10}/> Receipt Footer Message</label>
             <textarea 
               rows={2}
@@ -328,25 +533,39 @@ export function Settings({ settings, setSettings }: SettingsProps) {
         </div>
       </section>
 
-      <section className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-100 dark:border-slate-800 shadow-sm space-y-4">
-        <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium">{t.reset_app} - Only use if needed.</p>
-        <button 
-          onClick={() => setIsResetConfirmOpen(true)}
-          className="w-full py-3 bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 rounded-xl font-bold text-xs uppercase tracking-widest active:scale-95 transition-all"
-        >
-          {t.clear_data}
-        </button>
-      </section>
+      <div className="pt-8 flex flex-col items-center gap-2">
+        <div className="flex gap-4 w-full px-6">
+           <button onClick={handleExport} className="flex-1 bg-emerald-600 text-white py-3 rounded-2xl font-black text-xs uppercase tracking-widest active:scale-95 transition-all shadow-lg shadow-emerald-200">Export</button>
+           <button onClick={() => importInputRef.current?.click()} disabled={isImporting} className="flex-1 bg-slate-900 dark:bg-white text-white dark:text-slate-900 py-3 rounded-2xl font-black text-xs uppercase tracking-widest active:scale-95 transition-all shadow-lg shadow-slate-200 dark:shadow-slate-800 disabled:opacity-50 disabled:cursor-not-allowed">
+             {isImporting ? 'Importing...' : 'Import'}
+             <input type="file" ref={importInputRef} className="hidden" accept=".csv" onChange={handleImport} disabled={isImporting} />
+           </button>
+        </div>
 
-      <ConfirmModal 
-        isOpen={isResetConfirmOpen}
-        isLoading={false}
-        title={t.clear_data}
-        message={t.reset_warning}
-        onConfirm={resetData}
-        onCancel={() => setIsResetConfirmOpen(false)}
-        confirmLabel="Reset Everything"
-      />
+        <ConfirmModal
+          isOpen={signOutConfirm}
+          title="Sign Out"
+          message="Are you sure you want to sign out? Your unsynced local changes might be lost."
+          confirmLabel="Sign Out"
+          onConfirm={async () => {
+            setSignOutConfirm(false);
+            await executeLogout();
+          }}
+          onCancel={() => setSignOutConfirm(false)}
+        />
+
+        <div className="flex items-center gap-2 bg-rose-50 dark:bg-rose-900/10 px-4 py-2 rounded-full border border-rose-100 dark:border-rose-900/30">
+          <span className="w-2 h-2 bg-rose-500 rounded-full animate-pulse" />
+          <span className="text-[10px] font-black text-rose-600 dark:text-rose-400 uppercase tracking-widest">
+            Beta Version
+          </span>
+        </div>
+        <p className="text-[9px] text-slate-400 font-bold uppercase tracking-tighter text-center px-6">
+          Exciting new updates and professional features are coming in the future.
+          <br /> 
+          <span className="opacity-60">Build 2026.05.12 • Stable Preview</span>
+        </p>
+      </div>
     </div>
   );
 }

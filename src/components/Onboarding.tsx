@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Store, ArrowRight, Camera } from 'lucide-react';
+import { Store, ArrowRight } from 'lucide-react';
 import { FirestoreService } from '../lib/firestoreService';
 import { auth } from '../lib/firebase';
 import { ShopSettings } from '../types';
@@ -44,8 +44,8 @@ export function Onboarding() {
       >
         <div className="bg-white p-10 rounded-[40px] shadow-2xl border border-slate-100">
           <div className="flex flex-col items-center gap-6 mb-8 text-center">
-            <div className="w-20 h-20 bg-emerald-50 rounded-3xl flex items-center justify-center text-emerald-600">
-              <Store size={40} />
+            <div className="w-28 h-28 bg-emerald-50 rounded-[40px] flex items-center justify-center text-emerald-600 shadow-inner border-2 border-emerald-100">
+              <Store size={56} />
             </div>
             <div>
               <h1 className="text-2xl font-black text-slate-900 leading-tight">Setup Your Shop</h1>

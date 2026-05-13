@@ -45,7 +45,7 @@ export function ConfirmModal({
             <div className="p-8 text-center">
               <div className={cn(
                 "w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6",
-                isDanger ? "bg-rose-50 text-rose-500" : "bg-emerald-50 text-emerald-500"
+                isDanger ? "bg-red-50 text-red-500" : "bg-emerald-50 text-emerald-500"
               )}>
                 <AlertTriangle size={32} />
               </div>
@@ -67,7 +67,7 @@ export function ConfirmModal({
                 onClick={onConfirm}
                 className={cn(
                   "flex-1 py-4 text-sm font-black text-white transition-colors uppercase tracking-widest disabled:opacity-50",
-                  isDanger ? "bg-rose-600 hover:bg-rose-700" : "bg-emerald-600 hover:bg-emerald-700"
+                  isDanger ? "bg-red-600 hover:bg-red-700" : "bg-emerald-600 hover:bg-emerald-700"
                 )}
               >
                 {isLoading ? 'Wait...' : confirmLabel}

@@ -16,7 +16,8 @@ import {
   Lock,
   Wifi,
   WifiOff,
-  RefreshCw
+  RefreshCw,
+  Share2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Dashboard } from './components/Dashboard';
@@ -24,10 +25,12 @@ import { Customers } from './components/Customers';
 import { Inventory } from './components/Inventory';
 import { POS } from './components/POS';
 import { Reports } from './components/Reports';
+import { Expenses } from './components/Expenses';
 import { Settings } from './components/Settings';
 import { Login } from './components/Login';
 import { Onboarding } from './components/Onboarding';
 import { PINScreen } from './components/PINScreen';
+import { ConfirmModal } from './components/ConfirmModal';
 import { 
   onAuthStateChanged, 
   signOut,
@@ -35,7 +38,7 @@ import {
 } from './lib/firebase';
 import { auth } from './lib/firebase';
 import { FirestoreService } from './lib/firestoreService';
-import { Product, Customer, Transaction, ShopSettings } from './types';
+import { Product, Customer, Transaction, ShopSettings, Expense } from './types';
 import { cn } from './lib/utils';
 import { useNetworkStatus } from './lib/hooks';
 
@@ -48,12 +51,15 @@ export default function App() {
 function MainApp() {
   const isOnline = useNetworkStatus();
   const [user, setUser] = useState<any>(null);
-  const [isLocked, setIsLocked] = useState(false);
+  const [isGuest, setIsGuest] = useState(false);
+  const [isLocked, setIsLocked] = useState(true);
   const [authLoading, setAuthLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
+  const [settingsLoading, setSettingsLoading] = useState(true);
   const [currentPath, setCurrentPath] = useState('');
   const [renderError, setRenderError] = useState<string | null>(null);
+  const [targetCustomerId, setTargetCustomerId] = useState<string | null>(null);
 
   // Auth Listener
   useEffect(() => {
@@ -103,7 +109,7 @@ function MainApp() {
 
   // Sync effect
   useEffect(() => {
-    if (isOnline && user) {
+    if (isOnline && user && !localStorage.getItem('dukan_has_migrated')) {
       setIsSyncing(true);
       FirestoreService.syncLocalToCloud(user.uid).catch(err => {
         console.error("Sync failed:", err);
@@ -132,10 +138,63 @@ function MainApp() {
     });
   }, []);
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'customers' | 'inventory' | 'pos' | 'reports' | 'settings'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'customers' | 'inventory' | 'pos' | 'reports' | 'expenses' | 'settings'>('dashboard');
+  const [lastBackPress, setLastBackPress] = useState(0);
+  const [showExitToast, setShowExitToast] = useState(false);
+
+  // Sync activeTab with Browser History for Mobile Back Button
+  useEffect(() => {
+    const handlePopState = (event: PopStateEvent) => {
+      const state = event.state;
+
+      // If this is a subview state, let the component handle it (or ignore it)
+      if (state && (state.subview || state.view)) {
+        return;
+      }
+
+      // If we see a state with a tab, move to that tab
+      if (state && state.tab) {
+        setActiveTab(state.tab);
+        return;
+      }
+
+      // Fallback: If no state or sub-view handled it, default to dashboard
+      if (activeTab !== 'dashboard') {
+        setActiveTab('dashboard');
+        window.history.pushState({ tab: 'dashboard' }, '');
+      } else {
+        // We are on dashboard
+        const now = Date.now();
+        if (now - lastBackPress < 2000) {
+          setShowExitToast(false);
+        } else {
+          setLastBackPress(now);
+          setShowExitToast(true);
+          setTimeout(() => setShowExitToast(false), 2000);
+          window.history.pushState({ tab: 'dashboard' }, '');
+        }
+      }
+    };
+
+    // Push initial state
+    if (window.history.state?.tab !== 'dashboard') {
+      window.history.replaceState({ tab: 'dashboard' }, '');
+    }
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [activeTab, lastBackPress]);
+
+  // Push state when tab changes (if manually changed via UI)
+  useEffect(() => {
+    if (activeTab !== 'dashboard') {
+      window.history.pushState({ tab: activeTab }, '');
+    }
+  }, [activeTab]);
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
   const [shopSettings, setShopSettings] = useState<ShopSettings>({
     name: 'Dukaan Pro',
     phone: '',
@@ -147,20 +206,29 @@ function MainApp() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isNavHidden, setIsNavHidden] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [signOutConfirm, setSignOutConfirm] = useState(false);
 
   // Firestore Data Sync
   useEffect(() => {
-    if (!user) return;
+    // We sync for both real users AND guests (who use local storage via the same service)
+    if (!user && !isGuest) return;
 
     const unsubProducts = FirestoreService.subscribeToProducts(setProducts);
     const unsubCustomers = FirestoreService.subscribeToCustomers(setCustomers);
     const unsubTransactions = FirestoreService.subscribeToTransactions(setTransactions);
+    const unsubExpenses = FirestoreService.subscribeToExpenses(setExpenses);
     const unsubSettings = FirestoreService.subscribeToSettings((s) => {
+      setSettingsLoading(false);
       if (s) {
         setShopSettings(s);
         setNeedsOnboarding(false);
       } else {
-        setNeedsOnboarding(true);
+        if (!isGuest) {
+          setNeedsOnboarding(true);
+          setIsLocked(false);
+        } else {
+          setSettingsLoading(false);
+        }
       }
     });
 
@@ -168,9 +236,10 @@ function MainApp() {
       unsubProducts();
       unsubCustomers();
       unsubTransactions();
+      unsubExpenses();
       unsubSettings();
     };
-  }, [user]);
+  }, [user, isGuest]);
 
   // Handle theme application
   useEffect(() => {
@@ -207,10 +276,26 @@ function MainApp() {
     );
   }
 
-  if (authLoading) {
+  if (authLoading || (user && settingsLoading)) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <div className="w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+      <div className="min-h-screen bg-emerald-900 flex items-center justify-center">
+        <div className="w-12 h-12 border-4 border-emerald-400 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!user && !isGuest) {
+    return (
+      <div className="relative min-h-screen">
+        <Login />
+        <div className="fixed bottom-10 left-0 right-0 flex justify-center z-50">
+          <button 
+            onClick={() => setIsGuest(true)}
+            className="text-emerald-400/60 font-bold text-xs underline underline-offset-4 hover:text-emerald-400 transition-colors"
+          >
+            CONTINUE WITHOUT LOGGING IN (OFFLINE ONLY)
+          </button>
+        </div>
       </div>
     );
   }
@@ -240,20 +325,48 @@ function MainApp() {
     setActiveTab(path as any);
   };
 
-  // Notifications logic: Customers with balance > 0 and due date within 5 days
+  // Notifications logic: Customers with balance > 0 and due date approaching or past
   const dueNotifications = customers.filter(c => {
+    // Only notify if they owe us (positive balance) and have a due date
     if (c.balance <= 0 || !c.dueDate) return false;
-    const today = new Date();
-    const dueDate = new Date(c.dueDate);
-    const diffTime = dueDate.getTime() - today.getTime();
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    return diffDays <= 5 && diffDays >= 0;
+    
+    try {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      const dueDate = new Date(c.dueDate);
+      if (isNaN(dueDate.getTime())) return false; // Invalid date
+      
+      dueDate.setHours(0, 0, 0, 0);
+      
+      const diffTime = dueDate.getTime() - today.getTime();
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      
+      // Alert if overdue (diffDays < 0) OR due within 10 days
+      return diffDays <= 10;
+    } catch (e) {
+      return false;
+    }
   });
 
+  // Notifications logic: Products with stock below threshold
+  const lowStockNotifications = products.filter(p => {
+    return p.stock <= (p.lowStockThreshold || 5);
+  });
+
+  const totalNotifications = dueNotifications.length + lowStockNotifications.length;
+
   const handleSignOut = async () => {
-    if (confirm("Are you sure? Your data will not be backed up anymore.")) {
+    try {
+      localStorage.removeItem('dukan_has_migrated');
+      localStorage.removeItem('dukan_products');
+      localStorage.removeItem('dukan_customers');
+      localStorage.removeItem('dukan_transactions');
+      localStorage.removeItem('dukan_settings');
       await signOut(auth);
       window.location.reload();
+    } catch (error) {
+      console.error("Sign out error:", error);
     }
   };
 
@@ -303,16 +416,22 @@ function MainApp() {
           products={products} 
           customers={customers} 
           transactions={transactions} 
+          expenses={expenses}
           settings={shopSettings}
-          onNavigate={(tab) => setActiveTab(tab)}
+          onNavigate={(tab) => {
+            setTargetCustomerId(null);
+            setActiveTab(tab);
+          }}
         />;
       case 'customers':
         return <Customers 
           customers={customers} 
-          setCustomers={() => {}} // No-op as components will call service
+          setCustomers={setCustomers} 
           transactions={transactions}
-          setTransactions={() => {}}
+          setTransactions={setTransactions}
           settings={shopSettings}
+          setIsNavHidden={setIsNavHidden}
+          initialCustomerId={targetCustomerId}
         />;
       case 'inventory':
         return <Inventory 
@@ -335,6 +454,13 @@ function MainApp() {
           products={products}
           customers={customers}
           transactions={transactions} 
+          expenses={expenses}
+          settings={shopSettings}
+          onNavigate={(tab) => setActiveTab(tab)}
+        />;
+      case 'expenses':
+        return <Expenses 
+          expenses={expenses}
           settings={shopSettings}
         />;
       case 'settings':
@@ -360,103 +486,109 @@ function MainApp() {
         </div>
       )}
 
-      {/* Desktop Sidebar */}
-      <aside className={cn(
-        "bg-emerald-900 text-white flex-col shrink-0 sticky top-0 h-screen transition-all duration-300 z-50",
-        isNavHidden ? "w-0 -translate-x-full overflow-hidden" : "hidden md:flex w-64"
-      )}>
-        <div className="p-6">
-          <h1 className="text-2xl font-bold tracking-tight">Dukaan<span className="text-emerald-400"> Pro</span></h1>
-          <p className="text-[10px] text-emerald-300 opacity-80 uppercase tracking-widest mt-1 font-bold">Come to Dukaan pro and become digital</p>
-        </div>
-        
-        <nav className="flex-1 px-4 py-4 space-y-2 overflow-y-auto no-scrollbar">
-          {navigation.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => setActiveTab(item.id as any)}
-              className={cn(
-                "w-full flex items-center space-x-3 p-3 rounded-xl transition-all font-medium text-sm",
-                activeTab === item.id 
-                  ? "bg-emerald-800 text-white shadow-lg shadow-black/10" 
-                  : "text-emerald-300/80 hover:bg-emerald-800 hover:text-white"
-              )}
+      {/* Sidebar Drawer (Used for both mobile and desktop) */}
+      <AnimatePresence>
+        {isSidebarOpen && (
+          <>
+            <motion.div 
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setIsSidebarOpen(false)}
+              className="fixed inset-0 bg-black/60 z-40"
+            />
+            <motion.aside 
+              initial={{ x: "-100%" }} animate={{ x: 0 }} exit={{ x: "-100%" }}
+              transition={{ type: "spring", damping: 25, stiffness: 300 }}
+              className="fixed top-0 left-0 bottom-0 w-72 bg-emerald-900 text-white z-50 flex flex-col"
             >
-              {item.icon}
-              <div className="flex flex-col items-start leading-none">
-                <span>{item.label}</span>
-                <span className="text-[9px] opacity-60 uppercase tracking-tighter mt-0.5">{item.labelUr}</span>
+              <div className="p-6 flex justify-between items-center">
+                <div>
+                  <h1 className="text-2xl font-bold tracking-tight">Dukaan<span className="text-emerald-400"> Pro</span></h1>
+                  <p className="text-[10px] text-emerald-300 opacity-80 uppercase tracking-widest mt-1 font-bold">Come to Dukaan pro and become digital</p>
+                </div>
+                <button onClick={() => setIsSidebarOpen(false)} className="p-2 bg-emerald-800 rounded-xl"><X size={20}/></button>
               </div>
-            </button>
-          ))}
-          
-          <div className="pt-4 border-t border-emerald-800 mt-4">
-            <button
-              onClick={() => window.open('https://wa.me/923211088723?text=Assalam-o-Alaikum!%20I%20need%20help%20with%20Dukaan%20Pro.', '_blank')}
-              className="w-full flex items-center space-x-3 p-3 rounded-xl transition-all font-medium text-sm text-emerald-300/80 hover:bg-emerald-800 hover:text-white"
-            >
-              <MessageCircle size={20} />
-              <span>Help & Support</span>
-            </button>
-          </div>
-        </nav>
+              
+              <nav className="flex-1 px-4 py-4 space-y-2 overflow-y-auto">
+                {navigation.map((item) => (
+                  <button
+                    key={item.id}
+                    onClick={() => { 
+                      setActiveTab(item.id as any); 
+                      setIsSidebarOpen(false); 
+                      if (item.id === 'dashboard') setIsNavHidden(false); 
+                    }}
+                    className={cn(
+                      "w-full flex items-center space-x-3 p-4 rounded-2xl transition-all font-bold text-sm",
+                      activeTab === item.id 
+                        ? "bg-emerald-800 text-white shadow-xl shadow-black/20" 
+                        : "text-emerald-300 hover:bg-emerald-800"
+                    )}
+                  >
+                    {item.icon}
+                    <span>{item.label}</span>
+                  </button>
+                ))}
+                
+                <div className="pt-8 mt-8 border-t border-emerald-800 space-y-2">
+                  <button
+                    onClick={() => window.open('https://wa.me/923211088723?text=Assalam-o-Alaikum!%20I%20need%20help%20with%20Dukaan%20Pro', '_blank')}
+                    className="w-full flex items-center gap-3 p-4 rounded-2xl transition-all hover:bg-emerald-800 group"
+                  >
+                    <div className="bg-emerald-600 text-white p-2 rounded-xl group-hover:scale-110 transition-transform">
+                      <MessageCircle size={20}/>
+                    </div>
+                    <div className="text-left">
+                      <h3 className="font-bold text-white text-sm">Developer Support</h3>
+                      <p className="text-[10px] text-emerald-300 font-medium">Contact for bugs or custom features</p>
+                    </div>
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (navigator.share) {
+                        navigator.share({
+                          title: 'Dukaan Pro',
+                          url: 'https://ais-pre-ksuvaniosyfjqu7guwziey-604133282907.asia-southeast1.run.app/'
+                        }).catch(console.error);
+                      } else {
+                        alert('Share not supported on this browser');
+                      }
+                    }}
+                    className="w-full flex items-center space-x-3 p-4 rounded-2xl transition-all font-bold text-sm text-emerald-300 hover:bg-emerald-800"
+                  >
+                    <Share2 size={20} />
+                    <span>Share with friends</span>
+                  </button>
+                  <button 
+                    onClick={() => setSignOutConfirm(true)}
+                    className="w-full flex items-center space-x-3 p-4 rounded-2xl transition-all font-bold text-sm text-amber-200 hover:bg-emerald-800"
+                  >
+                    <LogOut size={20} />
+                    <span>Sign Out</span>
+                  </button>
+                </div>
+              </nav>
+            </motion.aside>
+          </>
+        )}
+      </AnimatePresence>
 
-        <div className="p-6 border-t border-emerald-800 space-y-4">
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 bg-emerald-500 rounded-xl flex items-center justify-center text-xl font-bold shadow-inner overflow-hidden">
-              {shopSettings.logoUrl ? (
-                <img src={shopSettings.logoUrl} alt="Logo" className="w-full h-full object-cover" />
-              ) : (
-                shopSettings.name.charAt(0)
-              )}
-            </div>
-            <div className="min-w-0">
-              <p className="text-sm font-bold truncate">{shopSettings.name}</p>
-              <p className="text-[10px] text-emerald-300 truncate">{user?.email}</p>
-            </div>
-          </div>
-          <button 
-            onClick={handleSignOut}
-            className="w-full flex items-center space-x-3 p-3 rounded-xl transition-all font-medium text-sm text-rose-300 hover:bg-rose-900/50 hover:text-white"
-          >
-            <LogOut size={20} />
-            <span>Sign Out</span>
-          </button>
-
-          {shopSettings.pinEnabled && (
-            <button 
-              onClick={() => {
-                setIsLocked(true);
-                setIsSidebarOpen(false);
-              }}
-              className="w-full flex items-center space-x-3 p-3 rounded-xl transition-all font-medium text-sm text-indigo-300 hover:bg-indigo-900/50 hover:text-white"
-            >
-              <Lock size={20} />
-              <span>Lock Now</span>
-            </button>
-          )}
-        </div>
-      </aside>
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-h-0 bg-slate-50 dark:bg-slate-950 relative overflow-x-hidden">
+      <div className="flex-1 flex flex-col h-screen w-full bg-slate-50 dark:bg-slate-950 relative overflow-hidden">
         {/* Top Header - Responsive */}
         <header className="h-16 md:h-20 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-4 md:px-8 shrink-0 z-20 sticky top-0 md:bg-white/80 dark:md:bg-slate-900/80 md:backdrop-blur-md">
           <div className="flex items-center gap-3">
             <button 
               onClick={() => {
-                if (window.innerWidth >= 768) {
-                  setIsNavHidden(!isNavHidden);
-                } else {
-                  setIsSidebarOpen(true);
-                }
+                console.log('Menu button clicked, toggling sidebar');
+                setIsSidebarOpen(prev => !prev);
               }}
               className="p-2 text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 rounded-lg active:scale-95 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
             >
               {shopSettings.logoUrl ? (
-                <img src={shopSettings.logoUrl} alt="Logo" className="w-5 h-5 object-contain rounded-sm" />
+                <img src={shopSettings.logoUrl} alt="Logo" className="w-12 h-12 md:w-14 md:h-14 object-contain rounded-xl shadow-lg border-2 border-white/10" />
               ) : (
-                <Menu size={20} />
+                <Menu size={32} />
               )}
             </button>
             <div>
@@ -525,15 +657,14 @@ function MainApp() {
                 onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
                 className={cn(
                   "p-2 rounded-xl transition-all relative active:scale-95",
-                  dueNotifications.length > 0 ? "bg-amber-100 text-amber-600" : "bg-slate-100 text-slate-500"
+                  totalNotifications > 0 ? "bg-rose-100 text-rose-600" : "bg-slate-100 text-slate-500"
                 )}
               >
                 <div className="relative">
-                  <Menu size={20} className="rotate-90 hidden" /> {/* Placeholder for logic */}
                   <span className="text-lg">🔔</span>
-                  {dueNotifications.length > 0 && (
-                    <span className="absolute -top-1 -right-1 w-4 h-4 bg-rose-500 text-white text-[8px] font-black flex items-center justify-center rounded-full border-2 border-white animate-pulse">
-                      {dueNotifications.length}
+                  {totalNotifications > 0 && (
+                    <span className="absolute -top-1 -right-1 w-4 h-4 bg-emerald-500 text-white text-[8px] font-black flex items-center justify-center rounded-full border-2 border-white animate-pulse">
+                      {totalNotifications}
                     </span>
                   )}
                 </div>
@@ -550,53 +681,73 @@ function MainApp() {
                       className="absolute right-0 mt-3 w-80 bg-white rounded-2xl shadow-2xl border border-slate-200 z-50 overflow-hidden"
                     >
                       <div className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
-                        <h3 className="font-black text-xs uppercase tracking-widest text-slate-900">Payment Alerts</h3>
-                        <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded text-[8px] font-black uppercase">
-                          Due Soon
-                        </span>
+                        <h3 className="font-black text-xs uppercase tracking-widest text-slate-900">🔔 Notifications</h3>
                       </div>
                       <div className="max-h-[300px] overflow-y-auto">
-                        {dueNotifications.length === 0 ? (
+                        {totalNotifications === 0 ? (
                           <div className="p-8 text-center">
-                            <p className="text-slate-400 text-xs font-bold">All caught up! No bills due soon.</p>
+                            <p className="text-slate-400 text-xs font-bold">No new notifications.</p>
                           </div>
                         ) : (
                           <div className="divide-y divide-slate-100">
+                            {/* Low Stock Alerts */}
+                            {lowStockNotifications.map(p => (
+                              <button 
+                                key={p.id}
+                                onClick={() => {
+                                  setActiveTab('inventory');
+                                  setIsNotificationsOpen(false);
+                                }}
+                                className="w-full p-4 flex items-center gap-3 hover:bg-rose-50 transition-colors text-left"
+                              >
+                                <div className="w-8 h-8 bg-rose-100 text-rose-600 rounded-lg flex items-center justify-center shrink-0">
+                                  <Package size={16} />
+                                </div>
+                                <div>
+                                  <p className="text-xs font-black text-slate-900 uppercase">{p.name}</p>
+                                  <p className="text-[10px] text-rose-600 font-bold">
+                                    Low Stock: {p.stock} remaining
+                                  </p>
+                                </div>
+                              </button>
+                            ))}
+                            {/* Due Payments Alerts */}
                             {dueNotifications.map(c => (
                               <button 
                                 key={c.id}
                                 onClick={() => {
+                                  setTargetCustomerId(c.id);
                                   setActiveTab('customers');
                                   setIsNotificationsOpen(false);
                                 }}
-                                className="w-full p-4 flex items-start gap-3 hover:bg-slate-50 transition-colors text-left"
+                                className="w-full p-4 flex items-start gap-3 hover:bg-amber-50 transition-colors text-left"
                               >
-                                <div className="w-8 h-8 bg-rose-100 text-rose-600 rounded-lg flex items-center justify-center shrink-0">
+                                <div className="w-8 h-8 bg-amber-100 text-amber-600 rounded-lg flex items-center justify-center shrink-0">
                                   <ArrowUpRight size={16} />
                                 </div>
                                 <div>
                                   <p className="text-xs font-black text-slate-900 uppercase">{c.name}</p>
                                   <p className="text-[10px] text-slate-500 font-bold mb-1">
-                                    Balance: <span className="text-rose-600">{shopSettings.currency} {c.balance.toLocaleString()}</span>
+                                    Balance: <span className="text-amber-600">{shopSettings.currency} {c.balance.toLocaleString()}</span>
                                   </p>
-                                  <p className="text-[9px] text-amber-600 font-black uppercase bg-amber-50 inline-block px-1.5 py-0.5 rounded">
-                                    Due: {new Date(c.dueDate!).toLocaleDateString('en-PK')}
-                                  </p>
+                                  {(() => {
+                                    const diff = Math.ceil((new Date(c.dueDate!).getTime() - new Date().setHours(0,0,0,0)) / (1000 * 60 * 60 * 24));
+                                    const isOverdue = diff < 0;
+                                    return (
+                                      <p className={cn(
+                                        "text-[9px] font-black uppercase px-1.5 py-0.5 rounded inline-block",
+                                        isOverdue ? "bg-amber-100 text-amber-600" : "bg-emerald-50 text-emerald-600"
+                                      )}>
+                                        {isOverdue ? `Overdue: ${Math.abs(diff)} days` : `Due: ${new Date(c.dueDate!).toLocaleDateString('en-PK')}`}
+                                      </p>
+                                    );
+                                  })()}
                                 </div>
                               </button>
                             ))}
                           </div>
                         )}
                       </div>
-                      <button 
-                        onClick={() => {
-                          setActiveTab('customers');
-                          setIsNotificationsOpen(false);
-                        }}
-                        className="w-full p-3 bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest hover:bg-slate-800 transition-colors"
-                      >
-                        View All Customers
-                      </button>
                     </motion.div>
                   </>
                 )}
@@ -621,72 +772,10 @@ function MainApp() {
         </main>
       </div>
 
-      {/* Mobile Drawer (Sidebar) */}
-      <AnimatePresence>
-        {isSidebarOpen && (
-          <>
-            <motion.div 
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              onClick={() => setIsSidebarOpen(false)}
-              className="fixed inset-0 bg-black/60 z-40 md:hidden"
-            />
-            <motion.aside 
-              initial={{ x: "-100%" }} animate={{ x: 0 }} exit={{ x: "-100%" }}
-              transition={{ type: "spring", damping: 25, stiffness: 300 }}
-              className="fixed top-0 left-0 bottom-0 w-72 bg-emerald-900 text-white z-50 flex flex-col md:hidden"
-            >
-              {/* Sidebar Content (same as desktop) */}
-              <div className="p-6 flex justify-between items-center">
-                <div>
-                  <h1 className="text-2xl font-bold tracking-tight">Dukaan<span className="text-emerald-400"> Pro</span></h1>
-                  <p className="text-[10px] text-emerald-300 opacity-80 uppercase tracking-widest mt-1 font-bold">Come to Dukaan pro and become digital</p>
-                </div>
-                <button onClick={() => setIsSidebarOpen(false)} className="p-2 bg-emerald-800 rounded-xl"><X size={20}/></button>
-              </div>
-              
-              <nav className="flex-1 px-4 py-4 space-y-2">
-                {navigation.map((item) => (
-                  <button
-                    key={item.id}
-                    onClick={() => { setActiveTab(item.id as any); setIsSidebarOpen(false); }}
-                    className={cn(
-                      "w-full flex items-center space-x-3 p-4 rounded-2xl transition-all font-bold text-sm",
-                      activeTab === item.id 
-                        ? "bg-emerald-800 text-white shadow-xl shadow-black/20" 
-                        : "text-emerald-300 hover:bg-emerald-800"
-                    )}
-                  >
-                    {item.icon}
-                    <span>{item.label}</span>
-                  </button>
-                ))}
-                
-                <div className="pt-8 mt-8 border-t border-emerald-800">
-                  <button
-                    onClick={() => window.open('https://wa.me/923211088723?text=Assalam-o-Alaikum!%20I%20need%20help%20with%20Dukaan%20Pro', '_blank')}
-                    className="w-full flex items-center space-x-3 p-4 rounded-2xl transition-all font-bold text-sm text-emerald-300 hover:bg-emerald-800"
-                  >
-                    <MessageCircle size={20} />
-                    <span>Help & Suggestions</span>
-                  </button>
-                  <button 
-                    onClick={handleSignOut}
-                    className="w-full flex items-center space-x-3 p-4 rounded-2xl transition-all font-bold text-sm text-rose-300 hover:bg-rose-900/50"
-                  >
-                    <LogOut size={20} />
-                    <span>Sign Out</span>
-                  </button>
-                </div>
-              </nav>
-            </motion.aside>
-          </>
-        )}
-      </AnimatePresence>
-
       {/* Bottom Navigation */}
       <nav className={cn(
         "fixed bottom-0 left-0 right-0 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border-t border-slate-200 dark:border-slate-800 px-2 py-3 pb-[env(safe-area-inset-bottom,12px)] flex justify-around items-center z-[100] shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.1)] transition-transform duration-300",
-        isNavHidden && "md:translate-y-full md:opacity-0 pointer-events-none md:hidden"
+        isNavHidden && "translate-y-full opacity-0 pointer-events-none"
       )}>
         <NavItem active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} icon={<LayoutDashboard size={22} />} label={t.home} />
         <NavItem active={activeTab === 'customers'} onClick={() => setActiveTab('customers')} icon={<Users size={22} />} label={t.customers} />
@@ -694,6 +783,33 @@ function MainApp() {
         <NavItem active={activeTab === 'inventory'} onClick={() => setActiveTab('inventory')} icon={<Package size={22} />} label={t.stock} />
         <NavItem active={activeTab === 'reports'} onClick={() => setActiveTab('reports')} icon={<BarChart3 size={22} />} label={t.report} />
       </nav>
+
+      {/* Double Back Exit Toast */}
+      <AnimatePresence>
+        {showExitToast && (
+          <motion.div 
+            initial={{ opacity: 0, y: 50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 20 }}
+            className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[200] px-6 py-3 bg-slate-900/90 backdrop-blur-md text-white rounded-2xl text-xs font-bold shadow-2xl flex items-center gap-3 border border-slate-700"
+          >
+            <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+            {shopSettings.language === 'ur' ? 'Band karne ke liye dubara back dabayein' : 'Press back again to exit'}
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <ConfirmModal
+        isOpen={signOutConfirm}
+        title="Sign Out"
+        message="Are you sure you want to sign out? Your unsynced local changes might be lost."
+        confirmLabel="Sign Out"
+        onConfirm={async () => {
+          setSignOutConfirm(false);
+          await handleSignOut();
+        }}
+        onCancel={() => setSignOutConfirm(false)}
+      />
 
       {/* Locked screen fully disabled for testing */}
     </div>

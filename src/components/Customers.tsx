@@ -21,8 +21,8 @@ import {
   Trash2,
   Calendar,
   Image as ImageIcon,
-  Camera,
-  Upload
+  Upload,
+  Pencil
 } from 'lucide-react';
 import { ConfirmModal } from './ConfirmModal';
 import { Customer, Transaction, ShopSettings } from '../types';
@@ -38,33 +38,101 @@ interface CustomersProps {
   transactions: Transaction[];
   setTransactions: React.Dispatch<React.SetStateAction<Transaction[]>>;
   settings: ShopSettings;
+  setIsNavHidden: (hidden: boolean) => void;
+  initialCustomerId?: string | null;
 }
 
-export function Customers({ customers, setCustomers, transactions, setTransactions, settings }: CustomersProps) {
+import { Calculator } from './Calculator';
+
+import { generateCustomerPDF, shareOnWhatsApp } from '../lib/reportService';
+
+export function Customers({ 
+  customers, 
+  setCustomers, 
+  transactions, 
+  setTransactions, 
+  settings, 
+  setIsNavHidden,
+  initialCustomerId = null
+}: CustomersProps) {
+  const [filterType, setFilterType] = useState<'all' | 'dene' | 'lene'>('all');
+  const [showReportOptions, setShowReportOptions] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isAddingCustomer, setIsAddingCustomer] = useState(false);
-  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(initialCustomerId);
+  
+  React.useEffect(() => {
+    if (initialCustomerId) {
+      setSelectedCustomerId(initialCustomerId);
+    }
+  }, [initialCustomerId]);
   const [newCustomer, setNewCustomer] = useState({ name: '', phone: '', balance: '0' });
   const [activeEntryType, setActiveEntryType] = useState<'received' | 'given' | null>(null);
   const [entryAmount, setEntryAmount] = useState('');
+  const [calcExpression, setCalcExpression] = useState('');
   const [entryDescription, setEntryDescription] = useState('');
   const [entryDueDate, setEntryDueDate] = useState('');
   const [entryProof, setEntryProof] = useState<string | null>(null);
   const [viewingProof, setViewingProof] = useState<string | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ type: 'transaction' | 'customer', id: string, extra?: any } | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+
+  // Reset editing state when customer changes
+  React.useEffect(() => {
+    setIsEditing(false);
+    setEditName('');
+    setEditPhone('');
+  }, [selectedCustomerId]);
+
+  // Support for hiding bottom nav in App.tsx
+  React.useEffect(() => {
+    if (activeEntryType || isAddingCustomer || selectedCustomerId) {
+      setIsNavHidden(true);
+    } else {
+      setIsNavHidden(false);
+    }
+    return () => setIsNavHidden(false);
+  }, [activeEntryType, isAddingCustomer, selectedCustomerId, setIsNavHidden]);
 
   const t = translations[settings.language as Language || 'en'];
 
+  // Sync local sub-views with browser history for Back Button support
+  React.useEffect(() => {
+    const handlePopState = (event: PopStateEvent) => {
+      if (activeEntryType) {
+           setActiveEntryType(null);
+      } else if (isAddingCustomer) {
+           setIsAddingCustomer(false);
+      } else if (selectedCustomerId) {
+           setSelectedCustomerId(null);
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [activeEntryType, isAddingCustomer, selectedCustomerId]);
+
   const selectedCustomer = customers.find(c => c.id === selectedCustomerId);
   const customerTransactions = transactions
-    .filter(t => t.customerId === selectedCustomerId)
+    .filter(t => t.customerId === selectedCustomerId && !t.isDeleted)
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
-  const filteredCustomers = customers.filter(c => 
-    c.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    c.phone.includes(searchQuery)
-  );
+
+
+  const totalDeneHain = customers.reduce((sum, c) => sum + (c.balance < 0 ? Math.abs(c.balance) : 0), 0);
+  const totalLeneHain = customers.reduce((sum, c) => sum + (c.balance > 0 ? c.balance : 0), 0);
+
+  const filteredCustomers = customers.filter(c => {
+    const matchesSearch = c.name.toLowerCase().includes(searchQuery.toLowerCase()) || c.phone.includes(searchQuery);
+    if (!matchesSearch) return false;
+    
+    if (filterType === 'dene') return c.balance < 0;
+    if (filterType === 'lene') return c.balance > 0;
+    return true;
+  });
 
   const confirmDelete = async () => {
     if (!deleteConfirmation) return;
@@ -75,16 +143,22 @@ export function Customers({ customers, setCustomers, transactions, setTransactio
         const transaction = deleteConfirmation.extra as Transaction;
         if (!selectedCustomer) return;
         
-        let revertAmount = 0;
-        if (transaction.type === 'payment_received' || transaction.type === 'payment') {
-          revertAmount = transaction.amount;
-        } else if (transaction.type === 'credit_given' || transaction.type === 'sale' || transaction.type === 'credit') {
-          revertAmount = -transaction.amount;
-        }
-        
         await FirestoreService.deleteTransaction(transaction.id);
+        
+        // Recalculate balance for this customer based on remaining transactions
+        const otherTxs = transactions.filter(t => t.customerId === selectedCustomer.id && !t.isDeleted && t.id !== transaction.id);
+        let newBalance = 0;
+        for (const t of otherTxs) {
+          const amt = parseFloat(t.amount as any) || 0;
+          if (t.type === 'payment_received' || t.type === 'payment' || t.type === 'return') {
+            newBalance -= amt;
+          } else if (t.type === 'credit_given' || t.type === 'sale' || t.type === 'credit') {
+            newBalance += amt;
+          }
+        }
+
         await FirestoreService.updateCustomer(selectedCustomer.id, {
-          balance: selectedCustomer.balance + revertAmount,
+          balance: newBalance,
           lastTransactionAt: new Date().toISOString()
         });
       } else if (deleteConfirmation.type === 'customer') {
@@ -151,7 +225,10 @@ export function Customers({ customers, setCustomers, transactions, setTransactio
     if (!selectedCustomer || !entryAmount || isProcessing) return;
     
     const amount = parseFloat(entryAmount);
-    if (isNaN(amount) || amount <= 0) return;
+    if (isNaN(amount) || amount <= 0) {
+      alert("Please enter a valid amount / Sahi raqam likhein");
+      return;
+    }
 
     setIsProcessing(true);
     try {
@@ -174,18 +251,40 @@ export function Customers({ customers, setCustomers, transactions, setTransactio
       if (entryProof) transaction.proofImage = entryProof;
 
       await FirestoreService.saveTransaction(transaction as Transaction);
+      
+      const otherTxs = transactions.filter(t => t.customerId === selectedCustomer.id && !t.isDeleted);
+      let newBalance = balanceChange;
+      for (const t of otherTxs) {
+        const amt = parseFloat(t.amount as any) || 0;
+        if (t.type === 'payment_received' || t.type === 'payment' || t.type === 'return') {
+          newBalance -= amt;
+        } else if (t.type === 'credit_given' || t.type === 'sale' || t.type === 'credit') {
+          newBalance += amt;
+        }
+      }
+
       await FirestoreService.updateCustomer(selectedCustomer.id, {
-        balance: selectedCustomer.balance + balanceChange,
-        lastTransactionAt: new Date().toISOString()
+        balance: newBalance,
+        lastTransactionAt: new Date().toISOString(),
+        dueDate: entryDueDate || selectedCustomer.dueDate || null
       });
 
       setEntryAmount('');
       setEntryDescription('');
       setEntryDueDate('');
       setEntryProof(null);
-      setActiveEntryType(null);
+      window.history.back();
+      
+      // Success Feedback
+      const alertDiv = document.createElement('div');
+      alertDiv.className = 'fixed top-20 left-1/2 -translate-x-1/2 bg-emerald-600 text-white px-8 py-4 rounded-[20px] shadow-2xl z-[200] font-black uppercase tracking-widest animate-bounce text-sm';
+      alertDiv.innerText = 'Record Saved / Jama Ho Gaya!';
+      document.body.appendChild(alertDiv);
+      setTimeout(() => alertDiv.remove(), 2500);
+      
     } catch (error) {
       console.error(error);
+      alert("Ghalti: Record save nahi hua. Internet check karein.");
     } finally {
       setIsProcessing(false);
     }
@@ -245,18 +344,37 @@ export function Customers({ customers, setCustomers, transactions, setTransactio
     window.open(url, '_blank');
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const compressImage = (base64Str: string): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.src = base64Str;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_WIDTH = 400;
+        if (img.width <= MAX_WIDTH) {
+           resolve(base64Str);
+           return;
+        }
+        const scaleSize = MAX_WIDTH / img.width;
+        canvas.width = MAX_WIDTH;
+        canvas.height = img.height * scaleSize;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { resolve(base64Str); return; }
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', 0.6));
+      };
+      img.onerror = () => resolve(base64Str);
+    });
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 500000) {
-      alert("Image is too large. Please select a smaller one (less than 500KB).");
-      return;
-    }
-
     const reader = new window.FileReader();
-    reader.onloadend = () => {
-      setEntryProof(reader.result as string);
+    reader.onloadend = async () => {
+      const compressed = await compressImage(reader.result as string);
+      setEntryProof(compressed);
     };
     reader.readAsDataURL(file);
   };
@@ -269,113 +387,152 @@ export function Customers({ customers, setCustomers, transactions, setTransactio
         initial={{ x: '100%' }}
         animate={{ x: 0 }}
         exit={{ x: '100%' }}
-        className="fixed inset-0 bg-white z-[80] flex flex-col"
+        className="fixed inset-0 bg-white dark:bg-slate-900 z-[1000] flex flex-col overflow-hidden"
       >
-        <div className="p-4 flex items-center border-b border-slate-100">
-          <button onClick={() => setActiveEntryType(null)} className="p-2 -ml-2 text-slate-500">
+        <div className="p-3 flex items-center border-b border-slate-100 dark:border-slate-800">
+          <button onClick={() => window.history.back()} className="p-2 -ml-2 text-slate-500">
             <ArrowLeft size={24} />
           </button>
           <div className="ml-2">
-            <h3 className="font-bold text-slate-900">
+            <h3 className="font-bold text-slate-900 dark:text-white text-sm">
               {activeEntryType === 'received' ? 'Maine liye' : 'Maine diye'} - {selectedCustomer.name}
             </h3>
           </div>
         </div>
 
-        <div className="flex-1 p-6 space-y-6">
-          <div className="flex items-center gap-2 border-b-2 border-slate-100 focus-within:border-emerald-500 py-4 transition-colors">
-            <span className={cn(
-              "text-3xl font-black",
-              activeEntryType === 'received' ? "text-emerald-600" : "text-rose-600"
-            )}>Rs.</span>
-            <input 
-              type="number" 
-              autoFocus
-              placeholder="0"
-              value={entryAmount}
-              onChange={(e) => setEntryAmount(e.target.value)}
-              className="text-4xl font-black w-full outline-none bg-transparent"
-            />
-            <div className="text-right">
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
-              </p>
+        <div className="flex-1 overflow-y-auto no-scrollbar">
+          <div className="p-4 space-y-4">
+            <div className="flex items-center gap-2 border-b-2 border-slate-100 dark:border-slate-800 py-2 transition-colors">
+              <span className={cn(
+                "text-2xl font-black",
+                activeEntryType === 'received' ? "text-emerald-600" : "text-rose-600"
+              )}>Rs.</span>
+              <div className="text-3xl font-black w-full outline-none bg-transparent">
+                {entryAmount || '0'}
+                {calcExpression && calcExpression !== entryAmount && (
+                  <span className="text-[10px] text-slate-400 block font-bold mt-0.5 uppercase tracking-widest ">
+                    {calcExpression}
+                  </span>
+                )}
+              </div>
+              <div className="text-right">
+                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest whitespace-nowrap">
+                  {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
+                </p>
+              </div>
             </div>
-          </div>
 
-          <div className="relative">
-            <input 
-              type="text" 
-              placeholder="Enter remark (e.g. Rice, Sugar, Cash, etc.)"
-              value={entryDescription}
-              onChange={(e) => setEntryDescription(e.target.value)}
-              className="w-full bg-slate-50 p-4 rounded-2xl text-sm font-medium border border-transparent focus:border-slate-200 outline-none"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-               <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">Due Date (Optional)</label>
-               <input 
-                 type="date"
-                 value={entryDueDate}
-                 onChange={(e) => setEntryDueDate(e.target.value)}
-                 className="w-full bg-slate-50 p-4 rounded-2xl text-sm font-medium border border-transparent focus:border-slate-200 outline-none"
-               />
+            <div className="relative">
+              <input 
+                type="text" 
+                placeholder="Notes (optional)"
+                value={entryDescription}
+                onChange={(e) => setEntryDescription(e.target.value)}
+                className="w-full bg-slate-50 dark:bg-slate-800/50 p-2.5 rounded-xl text-sm font-medium border border-transparent focus:border-slate-200 dark:focus:border-slate-700 outline-none"
+              />
             </div>
-            <div className="space-y-2">
-               <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">Proof (Screenshot)</label>
-               <label className="w-full h-[54px] bg-slate-50 rounded-2xl flex items-center justify-center border-2 border-dashed border-slate-200 cursor-pointer hover:bg-slate-100 transition-colors">
+
+            <div className="grid grid-cols-2 gap-3 pb-1">
+              <div className="space-y-1">
+                 <label className="block text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Due Date</label>
                  <input 
-                   type="file" 
-                   accept="image/*"
-                   className="hidden" 
-                   onChange={handleFileChange}
+                   type="date"
+                   value={entryDueDate}
+                   onChange={(e) => setEntryDueDate(e.target.value)}
+                   className="w-full bg-slate-50 dark:bg-slate-800/50 p-2.5 rounded-xl text-xs font-medium border border-transparent focus:border-slate-200 dark:focus:border-slate-700 outline-none"
                  />
-                 {entryProof ? (
-                    <div className="flex flex-col items-center gap-2">
-                      <div className="relative group">
-                        <img 
-                          src={entryProof} 
-                          alt="Preview" 
-                          className="h-10 w-10 object-cover rounded-lg border border-emerald-200"
-                        />
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); setEntryProof(null); }}
-                          className="absolute -top-2 -right-2 bg-rose-500 text-white rounded-full p-0.5 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity"
-                        >
-                          <Plus size={10} className="rotate-45" />
-                        </button>
+              </div>
+              <div className="col-span-2 space-y-1">
+                 <label className="block text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest ml-1">Payment Proof / Photo</label>
+                 <div className="grid grid-cols-2 gap-2">
+                   <label className="h-[41px] bg-slate-50 dark:bg-slate-800/50 rounded-xl flex items-center justify-center border-2 border-dashed border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+                     <input 
+                       type="file" 
+                       accept="image/*"
+                       capture="environment"
+                       className="hidden" 
+                       onChange={handleFileChange}
+                     />
+                     <div className="flex items-center gap-1 text-slate-400 font-bold text-[9px] uppercase tracking-widest">
+                       <Plus size={12} className="text-emerald-500" />
+                       Camera
+                     </div>
+                   </label>
+                   <label className="h-[41px] bg-slate-50 dark:bg-slate-800/50 rounded-xl flex items-center justify-center border-2 border-dashed border-slate-200 dark:border-slate-700 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+                     <input 
+                       type="file" 
+                       accept="image/*"
+                       className="hidden" 
+                       onChange={handleFileChange}
+                     />
+                     <div className="flex items-center gap-1 text-slate-400 font-bold text-[9px] uppercase tracking-widest">
+                       <ImageIcon size={12} className="text-blue-500" />
+                       Gallery
+                     </div>
+                   </label>
+                 </div>
+                 {entryProof && (
+                    <div className="mt-2 flex items-center justify-between bg-emerald-50 dark:bg-emerald-900/20 p-2 rounded-xl border border-emerald-100 dark:border-emerald-800">
+                      <div className="flex items-center gap-2">
+                        <img src={entryProof} alt="Proof" className="h-8 w-8 object-cover rounded-lg shadow-sm" referrerPolicy="no-referrer" />
+                        <span className="text-emerald-600 font-bold text-[8px] uppercase tracking-tighter">PROOF ATTACHED</span>
                       </div>
-                      <span className="text-emerald-600 font-bold text-[8px] uppercase">Attached</span>
-                    </div>
-                 ) : (
-                    <div className="flex items-center gap-2 text-slate-400 font-bold text-xs uppercase tracking-widest">
-                      <Upload size={18} />
-                      Upload
+                      <button 
+                        type="button" 
+                        onClick={() => setEntryProof(null)}
+                        className="text-red-500 p-1 hover:bg-red-100 dark:hover:bg-red-900/40 rounded-full"
+                      >
+                        <Trash2 size={14} />
+                      </button>
                     </div>
                  )}
-               </label>
+              </div>
             </div>
+
+            <button 
+              disabled={!entryAmount || isProcessing}
+              onClick={handleCreateEntry}
+              className={cn(
+                 "w-full py-4 rounded-2xl text-white font-black text-xl shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2",
+                 activeEntryType === 'received' ? "bg-emerald-600 shadow-emerald-200/50" : "bg-rose-600 shadow-rose-200/50",
+                 (!entryAmount || isProcessing) && "opacity-50"
+              )}
+            >
+              DONE
+            </button>
           </div>
         </div>
 
-        <div className="p-6 border-t border-slate-100 pb-[calc(1.5rem+72px)]">
-          <button 
-            disabled={!entryAmount || isProcessing}
-            onClick={handleCreateEntry}
-            className={cn(
-               "w-full py-4 rounded-2xl text-white font-black text-lg shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2",
-               activeEntryType === 'received' ? "bg-emerald-600 shadow-emerald-200" : "bg-rose-600 shadow-rose-200",
-               (!entryAmount || isProcessing) && "opacity-50"
-            )}
-          >
-            {isProcessing ? 'Processing...' : 'DONE'}
-            <Check size={24} />
-          </button>
+        <div className="bg-white dark:bg-slate-900 border-t border-slate-100 dark:border-slate-800 pb-[env(safe-area-inset-bottom,12px)]">
+          <Calculator 
+            onValueChange={(val, expr) => {
+              setEntryAmount(val);
+              if (expr !== undefined) setCalcExpression(expr);
+            }} 
+            onComplete={handleCreateEntry}
+            onClose={() => setActiveEntryType(null)}
+          />
         </div>
       </motion.div>
     );
+  };
+
+  const handleUpdateCustomer = async () => {
+    if (!selectedCustomer || !editName || !editPhone) return;
+    
+    setIsProcessing(true);
+    try {
+      await FirestoreService.updateCustomer(selectedCustomer.id, {
+        name: editName,
+        phone: editPhone
+      });
+      setIsEditing(false);
+    } catch (error) {
+      console.error(error);
+      alert("Error updating customer");
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const renderDetailView = () => {
@@ -390,24 +547,116 @@ export function Customers({ customers, setCustomers, transactions, setTransactio
       >
         <div className="bg-white p-4 flex items-center justify-between border-b border-slate-100">
           <div className="flex items-center gap-3">
-            <button onClick={() => setSelectedCustomerId(null)} className="p-1 -ml-1 text-slate-500">
+            <button onClick={() => window.history.back()} className="p-1 -ml-1 text-slate-500">
               <ArrowLeft size={24} />
             </button>
             <div className="h-10 w-10 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center font-black">
               {selectedCustomer.name.charAt(0)}
             </div>
             <div>
-              <h2 className="font-black text-slate-900 flex items-center gap-2">
-                {selectedCustomer.name}
-              </h2>
-              <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">{selectedCustomer.phone}</p>
+              {isEditing ? (
+                <div className="space-y-2">
+                  <input 
+                    type="text" 
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-200 rounded-lg py-1 px-2 text-sm font-bold outline-none focus:border-emerald-500"
+                    placeholder="Customer Name"
+                    autoFocus
+                  />
+                  <div className="flex items-center gap-2">
+                    <input 
+                      type="text" 
+                      value={editPhone}
+                      onChange={(e) => setEditPhone(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg py-1 px-2 text-xs font-bold outline-none focus:border-emerald-500"
+                      placeholder="Phone"
+                    />
+                    <button 
+                      onClick={handleUpdateCustomer}
+                      className="p-1.5 bg-emerald-600 text-white rounded-lg"
+                    >
+                      <Check size={16} />
+                    </button>
+                    <button 
+                      onClick={() => setIsEditing(false)}
+                      className="p-1.5 bg-slate-200 text-slate-500 rounded-lg"
+                    >
+                      <Plus className="rotate-45" size={16} />
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <h2 className="font-black text-slate-900 flex items-center gap-2">
+                    {selectedCustomer.name}
+                    <button 
+                      onClick={() => {
+                        setEditName(selectedCustomer.name);
+                        setEditPhone(selectedCustomer.phone);
+                        setIsEditing(true);
+                      }}
+                      className="p-1 text-slate-300 hover:text-emerald-500 transition-colors"
+                    >
+                      <Pencil size={14} />
+                    </button>
+                  </h2>
+                  <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">{selectedCustomer.phone}</p>
+                </>
+              )}
             </div>
           </div>
-          <div className="flex gap-2">
-            <button className="p-2 bg-slate-100 rounded-xl text-slate-600">
+          <div className="flex gap-2 relative">
+            <button 
+              onClick={() => setShowReportOptions(!showReportOptions)}
+              className="p-2 bg-slate-100 rounded-xl text-slate-600 hover:bg-slate-200 transition-colors"
+            >
                <FileText size={20} />
             </button>
-            <button onClick={() => deleteCustomer(selectedCustomer.id)} className="p-2 bg-rose-50 rounded-xl text-rose-500">
+            
+            <AnimatePresence>
+              {showReportOptions && (
+                <>
+                  <div 
+                    className="fixed inset-0 z-[80]" 
+                    onClick={() => setShowReportOptions(false)} 
+                  />
+                  <motion.div 
+                    initial={{ opacity: 0, y: 10, scale: 0.9 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 10, scale: 0.9 }}
+                    className="absolute right-0 top-12 w-48 bg-white rounded-2xl shadow-2xl border border-slate-100 p-2 z-[90]"
+                  >
+                    <button 
+                      onClick={() => {
+                        generateCustomerPDF(selectedCustomer, customerTransactions, settings);
+                        setShowReportOptions(false);
+                      }}
+                      className="w-full flex items-center gap-3 p-3 hover:bg-slate-50 rounded-xl text-left text-sm font-bold text-slate-700"
+                    >
+                      <div className="h-8 w-8 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center">
+                        <FileText size={16} />
+                      </div>
+                      PDF Statement
+                    </button>
+                    <button 
+                      onClick={() => {
+                        shareOnWhatsApp(selectedCustomer, customerTransactions, settings);
+                        setShowReportOptions(false);
+                      }}
+                      className="w-full flex items-center gap-3 p-3 hover:bg-slate-50 rounded-xl text-left text-sm font-bold text-slate-700"
+                    >
+                      <div className="h-8 w-8 bg-emerald-50 text-emerald-600 rounded-lg flex items-center justify-center">
+                        <MessageCircle size={16} />
+                      </div>
+                      WhatsApp Detail
+                    </button>
+                  </motion.div>
+                </>
+              )}
+            </AnimatePresence>
+
+            <button onClick={() => deleteCustomer(selectedCustomer.id)} className="p-2 bg-red-50 rounded-xl text-red-500 hover:bg-red-100 transition-colors">
                <Trash2 size={20} />
             </button>
           </div>
@@ -463,7 +712,7 @@ export function Customers({ customers, setCustomers, transactions, setTransactio
                       {t.dueDate && (
                         <p className={cn(
                           "text-[10px] px-1 rounded font-bold flex items-center gap-0.5",
-                          new Date(t.dueDate) < new Date() ? "bg-rose-50 text-rose-500" : "bg-blue-50 text-blue-500"
+                          new Date(t.dueDate) < new Date() ? "bg-amber-50 text-amber-500" : "bg-blue-50 text-blue-500"
                         )}>
                           <Clock size={8} /> Due: {new Date(t.dueDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
                         </p>
@@ -493,7 +742,7 @@ export function Customers({ customers, setCustomers, transactions, setTransactio
                         e.stopPropagation();
                         handleDeleteTransaction(t);
                       }}
-                      className="p-1.5 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all"
+                      className="p-1.5 text-slate-300 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all"
                       title="Delete Entry"
                     >
                       <Trash2 size={14} />
@@ -507,15 +756,31 @@ export function Customers({ customers, setCustomers, transactions, setTransactio
 
         <div className="fixed bottom-[72px] left-0 right-0 p-4 bg-white/80 backdrop-blur-md grid grid-cols-2 gap-4 border-t border-slate-100 z-[70] shadow-[0_-10px_20px_-5px_rgba(0,0,0,0.05)]">
           <button 
-            onClick={() => setActiveEntryType('received')}
+            onClick={() => {
+              setEntryAmount('');
+              setCalcExpression('');
+              setEntryDescription('');
+              setEntryDueDate('');
+              setEntryProof(null);
+              window.history.pushState({subview: true}, '');
+              setActiveEntryType('received');
+            }}
             className="bg-white border-2 border-emerald-500 text-emerald-600 flex items-center justify-center gap-2 py-4 rounded-2xl font-black text-sm active:scale-95 transition-all shadow-xl shadow-emerald-50"
           >
             <TrendingDown size={20} />
             MAINE LIYE
           </button>
           <button 
-            onClick={() => setActiveEntryType('given')}
-            className="bg-white border-2 border-rose-500 text-rose-600 flex items-center justify-center gap-2 py-4 rounded-2xl font-black text-sm active:scale-95 transition-all shadow-xl shadow-rose-50"
+            onClick={() => {
+              setEntryAmount('');
+              setCalcExpression('');
+              setEntryDescription('');
+              setEntryDueDate('');
+              setEntryProof(null);
+              window.history.pushState({subview: true}, '');
+              setActiveEntryType('given');
+            }}
+            className="bg-white border-2 border-rose-600 text-rose-600 flex items-center justify-center gap-2 py-4 rounded-2xl font-black text-sm active:scale-95 transition-all shadow-xl shadow-rose-50"
           >
             MAINE DIYE
             <TrendingUp size={20} />
@@ -565,7 +830,41 @@ export function Customers({ customers, setCustomers, transactions, setTransactio
 
   return (
     <div className="h-full flex flex-col bg-slate-50 dark:bg-slate-950 transition-colors">
-      <div className="p-4 bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 flex gap-2">
+      <div className="px-4 pt-4 bg-white dark:bg-slate-900">
+        <div className="flex gap-3">
+          <button 
+            onClick={() => setFilterType(filterType === 'dene' ? 'all' : 'dene')}
+            className={cn(
+              "flex-1 p-4 rounded-[24px] border-2 transition-all flex flex-col items-center justify-center bg-white dark:bg-slate-900 shadow-sm",
+              filterType === 'dene' ? "border-[#4ade80]" : "border-slate-100 dark:border-slate-800"
+            )}
+          >
+            <span className="text-[24px] font-medium text-[#4ade80] tracking-tight">
+              Rs. {totalDeneHain.toLocaleString()}
+            </span>
+            <span className="text-[13px] text-slate-400 font-medium mt-1">
+              Maine deine hain
+            </span>
+          </button>
+
+          <button 
+            onClick={() => setFilterType(filterType === 'lene' ? 'all' : 'lene')}
+            className={cn(
+              "flex-1 p-4 rounded-[24px] border-2 transition-all flex flex-col items-center justify-center bg-white dark:bg-slate-900 shadow-sm",
+              filterType === 'lene' ? "border-rose-400" : "border-slate-100 dark:border-slate-800"
+            )}
+          >
+            <span className="text-[24px] font-medium text-rose-600 tracking-tight">
+              Rs. {totalLeneHain.toLocaleString()}
+            </span>
+            <span className="text-[13px] text-slate-400 font-medium mt-1">
+              Maine leine hain
+            </span>
+          </button>
+        </div>
+      </div>
+
+      <div className="p-4 bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 flex gap-2 pt-4">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
           <input 
@@ -601,7 +900,7 @@ export function Customers({ customers, setCustomers, transactions, setTransactio
               key={customer.id}
               className="bg-white dark:bg-slate-900 rounded-2xl p-4 flex items-center justify-between border border-slate-100 dark:border-slate-800 hover:shadow-md transition-shadow cursor-pointer active:scale-[0.98]"
             >
-              <div className="flex items-center gap-4 flex-1" onClick={() => setSelectedCustomerId(customer.id)}>
+              <div className="flex items-center gap-4 flex-1" onClick={() => { window.history.pushState({subview: true}, ''); setSelectedCustomerId(customer.id); }}>
                 <div className="h-12 w-12 bg-slate-50 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border border-slate-100 dark:border-slate-700 rounded-full flex items-center justify-center font-black text-lg">
                   {customer.name.charAt(0).toUpperCase()}
                 </div>
@@ -614,7 +913,7 @@ export function Customers({ customers, setCustomers, transactions, setTransactio
                 </div>
               </div>
               <div className="flex items-center gap-4">
-                <div className="text-right" onClick={() => setSelectedCustomerId(customer.id)}>
+                <div className="text-right" onClick={() => { window.history.pushState({subview: true}, ''); setSelectedCustomerId(customer.id); }}>
                   <p className={cn(
                     "font-black text-lg",
                     customer.balance > 0 ? "text-rose-600" : customer.balance < 0 ? "text-emerald-600" : "text-slate-300 dark:text-slate-700"
@@ -623,7 +922,7 @@ export function Customers({ customers, setCustomers, transactions, setTransactio
                   </p>
                   <div className="flex items-center justify-end gap-1 text-[8px] font-black uppercase tracking-widest">
                     {customer.balance > 0 ? (
-                        <span className="text-rose-400">Maine lene hain</span>
+                        <span className="text-rose-500">Maine lene hain</span>
                     ) : customer.balance < 0 ? (
                         <span className="text-emerald-400">Maine dene hain</span>
                     ) : (
@@ -640,7 +939,7 @@ export function Customers({ customers, setCustomers, transactions, setTransactio
                     <MessageCircle size={20} />
                   </button>
                 )}
-                <ChevronRight size={16} className="text-slate-300 dark:text-slate-700" onClick={() => setSelectedCustomerId(customer.id)} />
+                <ChevronRight size={16} className="text-slate-300 dark:text-slate-700" onClick={() => { window.history.pushState({subview: true}, ''); setSelectedCustomerId(customer.id); }} />
               </div>
             </motion.div>
           ))

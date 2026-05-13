@@ -41,7 +41,7 @@
       "properties": {
         "id": { "type": "string" },
         "ownerId": { "type": "string" },
-        "type": { "type": "string", "enum": ["sale", "received", "given"] },
+        "type": { "type": "string", "enum": ["sale", "received", "given", "payment_received", "credit_given", "payment", "credit"] },
         "amount": { "type": "number" },
         "description": { "type": "string" },
         "customerId": { "type": "string" },
@@ -49,6 +49,8 @@
         "customerPhone": { "type": "string" },
         "paymentMethod": { "type": "string" },
         "createdAt": { "type": "string" },
+        "dueDate": { "type": "string" },
+        "proofImage": { "type": "string" },
         "items": {
           "type": "array",
           "items": {
@@ -77,6 +79,21 @@
         "logoUrl": { "type": "string" },
         "ownerEmail": { "type": "string" }
       }
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "Business expenses",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "ownerId": { "type": "string" },
+        "amount": { "type": "number" },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "evidenceUrl": { "type": "string" }
+      },
+      "required": ["id", "ownerId", "amount", "description", "createdAt"]
     }
   },
   "firestore": {
@@ -91,6 +108,10 @@
     "/transactions/{transactionId}": {
       "schema": "Transaction",
       "description": "Individual transaction documents"
+    },
+    "/expenses/{expenseId}": {
+      "schema": "Expense",
+      "description": "Business expense records"
     },
     "/settings/{userId}": {
       "schema": "Settings",

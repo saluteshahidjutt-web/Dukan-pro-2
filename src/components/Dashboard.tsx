@@ -1,9 +1,8 @@
 import React from 'react';
-import { TrendingUp, Users, AlertTriangle, Wallet, ArrowUpRight, ArrowDownRight, BarChart3, ShoppingCart, Package } from 'lucide-react';
-import { Product, Customer, Transaction, ShopSettings } from '../types';
+import { TrendingUp, Users, AlertTriangle, Wallet, ArrowUpRight, ArrowDownRight, BarChart3, ShoppingCart, Package, X, Trash2, RefreshCw } from 'lucide-react';
+import { Product, Customer, Transaction, ShopSettings, Expense } from '../types';
 import { formatCurrency, cn } from '../lib/utils';
 import { motion } from 'motion/react';
-import { Trash2 } from 'lucide-react';
 import { FirestoreService } from '../lib/firestoreService';
 
 import { translations, Language } from '../lib/translations';
@@ -12,11 +11,24 @@ interface DashboardProps {
   products: Product[];
   customers: Customer[];
   transactions: Transaction[];
+  expenses: Expense[];
   settings: ShopSettings;
   onNavigate: (tab: any) => void;
 }
 
-export function Dashboard({ products, customers, transactions, settings, onNavigate }: DashboardProps) {
+export function Dashboard({ products, customers, transactions, expenses, settings, onNavigate }: DashboardProps) {
+  const [showSalesModal, setShowSalesModal] = React.useState(false);
+
+  const handleReturnTransaction = async (tx: Transaction) => {
+    if (!window.confirm('Are you sure you want to process a return for this transaction?')) return;
+    
+    try {
+      await FirestoreService.processReturn(tx);
+    } catch (e) {
+      alert('Error processing return');
+    }
+  };
+
   const handleDeleteTransaction = async (tx: Transaction) => {
     if (!window.confirm('Delete this transaction? Errors in balance or stock must be fixed manually.')) return;
     try {
@@ -32,18 +44,51 @@ export function Dashboard({ products, customers, transactions, settings, onNavig
   
   const todaySales = transactions
     .filter(t => {
-      const isSale = t.type === 'sale';
       const txDate = new Date(t.createdAt);
-      return isSale && txDate.getTime() >= todayStart;
+      return !t.isDeleted && txDate.getTime() >= todayStart;
     })
-    .reduce((sum, t) => sum + t.amount, 0);
+    .reduce((sum, t) => {
+      if (t.type === 'sale') return sum + t.amount;
+      if (t.type === 'return') return sum - t.amount;
+      return sum;
+    }, 0);
 
   const totalSalesAllTime = transactions
-    .filter(t => t.type === 'sale')
-    .reduce((sum, t) => sum + t.amount, 0);
+    .filter(t => !t.isDeleted)
+    .reduce((sum, t) => {
+      if (t.type === 'sale') return sum + t.amount;
+      if (t.type === 'return') return sum - t.amount;
+      return sum;
+    }, 0);
 
   const totalUdhar = customers.reduce((sum, c) => sum + (c.balance > 0 ? c.balance : 0), 0);
   const lowStockCount = products.filter(p => p.stock <= p.lowStockThreshold).length;
+
+  const todayExpenses = expenses
+    .filter(e => {
+       const d = new Date(e.createdAt);
+       return d.getTime() >= todayStart;
+    })
+    .reduce((sum, e) => sum + e.amount, 0);
+
+  // Best Selling Products
+  const productSalesMap = new Map<string, number>();
+  transactions
+    .filter(t => t.type === 'sale' && !t.isDeleted && t.items)
+    .forEach(t => {
+      t.items?.forEach(item => {
+        productSalesMap.set(item.productId, (productSalesMap.get(item.productId) || 0) + item.quantity);
+      });
+    });
+
+  const bestSellingProducts = Array.from(productSalesMap.entries())
+    .map(([id, qty]) => ({
+      product: products.find(p => p.id === id),
+      quantity: qty
+    }))
+    .filter(item => item.product)
+    .sort((a, b) => b.quantity - a.quantity)
+    .slice(0, 4);
 
   const t = translations[settings.language as Language || 'en'];
 
@@ -64,6 +109,16 @@ export function Dashboard({ products, customers, transactions, settings, onNavig
           trend={`${formatCurrency(totalSalesAllTime, settings.currency)}`}
           trendLabel={t.total}
           color="emerald"
+          onClick={() => setShowSalesModal(true)}
+        />
+        <StatCard 
+          icon={<ArrowDownRight className="text-emerald-600 dark:text-emerald-400" size={20} />}
+          label="Today's Expenses"
+          value={formatCurrency(todayExpenses, settings.currency)}
+          trend={formatCurrency(expenses.reduce((s, e) => s + e.amount, 0), settings.currency)}
+          trendLabel="Total"
+          color="emerald"
+          onClick={() => onNavigate('expenses')}
         />
         <StatCard 
           icon={<Wallet className="text-amber-600 dark:text-amber-400" size={20} />}
@@ -73,17 +128,10 @@ export function Dashboard({ products, customers, transactions, settings, onNavig
           onClick={() => onNavigate('customers')}
         />
         <StatCard 
-          icon={<Users className="text-blue-600 dark:text-blue-400" size={20} />}
-          label={t.total_customers}
-          value={customers.length.toString()}
-          color="blue"
-          onClick={() => onNavigate('customers')}
-        />
-        <StatCard 
-          icon={<AlertTriangle className={cn(lowStockCount > 0 ? "text-rose-600 dark:text-rose-400" : "text-slate-400 dark:text-slate-600")} size={20} />}
+          icon={<AlertTriangle className={cn(lowStockCount > 0 ? "text-amber-600 dark:text-amber-400" : "text-slate-400 dark:text-slate-600")} size={20} />}
           label={t.low_stock}
           value={lowStockCount.toString()}
-          color={lowStockCount > 0 ? "rose" : "slate"}
+          color={lowStockCount > 0 ? "amber" : "slate"}
           onClick={() => onNavigate('inventory')}
         />
       </div>
@@ -101,6 +149,13 @@ export function Dashboard({ products, customers, transactions, settings, onNavig
             labelClass="!text-white"
             subClass="!text-emerald-100"
             iconClass="!bg-emerald-500/50 !text-white"
+          />
+          <ActionButton 
+            label="Expenses" 
+            sub="Manage Kharcha" 
+            icon={<ArrowDownRight size={20} />} 
+            onClick={() => onNavigate('expenses')}
+            className="bg-emerald-50 dark:bg-emerald-900/10 !border-emerald-100 dark:!border-emerald-900/30"
           />
           <ActionButton 
             label={t.add_customer} 
@@ -122,6 +177,140 @@ export function Dashboard({ products, customers, transactions, settings, onNavig
           />
         </div>
       </section>
+
+      {/* Best Selling Products */}
+      <section>
+        <h3 className="text-lg font-bold mb-3 dark:text-white">Mashhoor Products (Top Selling)</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {bestSellingProducts.map(({ product, quantity }: any) => (
+            <div key={product.id} className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-100 dark:border-slate-800 flex items-center gap-4 transition-all hover:shadow-md">
+              <div className="h-12 w-12 bg-emerald-50 dark:bg-emerald-900/20 rounded-xl flex items-center justify-center shrink-0">
+                {product.image ? (
+                  <img src={product.image} alt={product.name} className="h-full w-full object-cover rounded-xl" />
+                ) : (
+                  <Package className="text-emerald-600 dark:text-emerald-400" size={24} />
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-black text-slate-900 dark:text-white truncate uppercase text-sm">{product.name}</p>
+                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">{product.category}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-xs font-black text-emerald-600 dark:text-emerald-400 uppercase">{quantity} SOLD</p>
+                <p className="text-[10px] text-slate-400 font-bold">{formatCurrency(product.price * quantity, settings.currency)}</p>
+              </div>
+            </div>
+          ))}
+          {bestSellingProducts.length === 0 && (
+            <div className="col-span-full py-8 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-700 flex flex-col items-center justify-center">
+               <Package size={32} className="text-slate-300 mb-2" />
+               <p className="text-slate-400 font-bold text-sm">Abhi tak koi product sale nahi hui.</p>
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* Sales Log Modal */}
+      {showSalesModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-[32px] overflow-hidden shadow-2xl flex flex-col max-h-[85vh]"
+          >
+            <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50 dark:bg-slate-800/50">
+              <div>
+                <h3 className="text-xl font-black text-slate-900 dark:text-white uppercase tracking-tighter">
+                  {t.total_sales}
+                </h3>
+              </div>
+              <button 
+                onClick={() => setShowSalesModal(false)}
+                className="p-2 bg-white dark:bg-slate-900 text-slate-400 rounded-full shadow-sm hover:text-red-500 transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="p-4 flex-1 overflow-y-auto no-scrollbar">
+              <div className="space-y-3">
+                {transactions
+                  .filter(tx => tx.type === 'sale' && !tx.isDeleted)
+                  .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+                  .map(tx => (
+                    <div key={tx.id} className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-700/50 flex justify-between items-center group hover:bg-white dark:hover:bg-slate-800 transition-all hover:shadow-md">
+                      <div className="flex items-center gap-4">
+                        <div className={cn(
+                          "w-10 h-10 rounded-xl flex items-center justify-center shadow-sm",
+                          tx.paymentMethod === 'cash' ? "bg-emerald-100 text-emerald-600" : 
+                          tx.paymentMethod === 'udhar' ? "bg-amber-100 text-amber-600" : "bg-indigo-100 text-indigo-600"
+                        )}>
+                          <ShoppingCart size={20} />
+                        </div>
+                        <div>
+                          <p className="text-sm font-black text-slate-900 dark:text-white uppercase">{tx.description}</p>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <span className="text-[10px] text-slate-400 font-bold">{new Date(tx.createdAt).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+                            {tx.customerName && <span className="text-[9px] bg-slate-200 dark:bg-slate-700 px-1.5 py-0.5 rounded text-slate-600 dark:text-slate-400 font-bold uppercase">Customer: {tx.customerName}</span>}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <div className="text-right">
+                          <p className="text-sm font-black text-slate-900 dark:text-white">{formatCurrency(tx.amount, settings.currency)}</p>
+                          <span className={cn(
+                             "text-[9px] font-black uppercase px-2 py-0.5 rounded shadow-sm inline-block",
+                             tx.paymentMethod === 'cash' ? "bg-emerald-600 text-white" : 
+                             tx.paymentMethod === 'udhar' ? "bg-amber-500 text-white" : "bg-indigo-600 text-white"
+                          )}>
+                            {tx.paymentMethod || 'sale'}
+                          </span>
+                        </div>
+                        {tx.type === 'sale' && !tx.isDeleted && (
+                          <button 
+                            onClick={() => handleReturnTransaction(tx)}
+                            className="p-2 text-slate-300 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-xl transition-all"
+                          >
+                            <RefreshCw size={18} />
+                          </button>
+                        )}
+                        {!tx.isDeleted && (
+                          <button 
+                            onClick={() => handleDeleteTransaction(tx)}
+                            className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-all"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                
+                {transactions.filter(tx => tx.type === 'sale' && !tx.isDeleted).length === 0 && (
+                  <div className="text-center py-12">
+                    <p className="text-slate-400 font-bold">Abhi tak koi sale nahi hui.</p>
+                    <button 
+                      onClick={() => onNavigate('pos')}
+                      className="mt-4 text-emerald-600 text-xs font-black uppercase tracking-widest decoration-dotted underline underline-offset-4"
+                    >
+                      Pehli Sale Karein
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            <div className="p-4 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-100 dark:border-slate-800">
+              <button 
+                onClick={() => setShowSalesModal(false)}
+                className="w-full bg-slate-900 dark:bg-white text-white dark:text-slate-900 py-4 rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl active:scale-95 transition-all"
+              >
+                Done
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 }
@@ -131,7 +320,6 @@ function StatCard({ icon, label, labelUr, value, trend, trendLabel, color, onCli
     emerald: "text-emerald-600 dark:text-emerald-400",
     amber: "text-amber-500 dark:text-amber-400",
     blue: "text-slate-800 dark:text-blue-400",
-    rose: "text-rose-500 dark:text-rose-400",
     slate: "text-slate-400 dark:text-slate-600",
   };
 

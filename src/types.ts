@@ -21,11 +21,13 @@ export interface Customer {
   phone: string;
   balance: number; // Positive = user owes us (Udhar), Negative = We owe user (Prepaid)
   lastTransactionAt: string;
+  dueDate?: string;
+  lastTransactionType?: string;
 }
 
 export interface Transaction {
   id: string;
-  type: 'sale' | 'payment' | 'credit' | 'payment_received' | 'credit_given';
+  type: 'sale' | 'payment' | 'credit' | 'payment_received' | 'credit_given' | 'return';
   amount: number;
   description: string;
   customerId?: string;
@@ -36,12 +38,24 @@ export interface Transaction {
   proofImage?: string;
   dueDate?: string;
   paymentMethod?: 'cash' | 'jazzcash' | 'easypaisa' | 'udhar' | 'split';
+  isDeleted?: boolean;
+  deletedAt?: string;
   splitDetails?: {
     cash?: number;
     udhar?: number;
     jazzcash?: number;
     easypaisa?: number;
   };
+}
+
+export interface Expense {
+  id: string;
+  amount: number;
+  description: string;
+  category: string;
+  createdAt: string;
+  evidenceUrl?: string;
+  ownerId?: string;
 }
 
 export interface ShopSettings {
@@ -55,6 +69,7 @@ export interface ShopSettings {
   securityAnswerHash?: string;
   logoUrl?: string;
   receiptFooter?: string;
+  address?: string;
   theme?: 'light' | 'dark';
   ownerEmail?: string;
 }

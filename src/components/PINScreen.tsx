@@ -222,8 +222,12 @@ export function PINScreen({ settings, onSuccess, mode, onBack, onSetupComplete }
         }}
         className="w-full max-w-sm flex flex-col items-center gap-8"
       >
-        <div className="w-20 h-20 bg-emerald-50 rounded-3xl flex items-center justify-center text-emerald-600 shadow-sm border border-emerald-100">
-          {mode === 'setup' ? <ShieldCheck size={40} /> : <Lock size={40} />}
+        <div className="w-36 h-36 bg-emerald-50 rounded-[40px] flex items-center justify-center text-emerald-600 shadow-inner border-2 border-emerald-100 overflow-hidden">
+          {settings.logoUrl ? (
+            <img src={settings.logoUrl} alt="Logo" className="w-full h-full object-cover" />
+          ) : (
+            mode === 'setup' ? <ShieldCheck size={72} /> : <Lock size={72} />
+          )}
         </div>
 
         <div className="text-center">

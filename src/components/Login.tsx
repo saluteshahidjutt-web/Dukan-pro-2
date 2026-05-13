@@ -4,12 +4,22 @@ import { signInWithPopup, getGoogleProvider, auth } from '../lib/firebase';
 import { motion } from 'motion/react';
 
 export function Login() {
+  const [isLoading, setIsLoading] = React.useState(false);
+
   const handleLogin = async () => {
+    if (isLoading) return;
+    setIsLoading(true);
     try {
       const provider = new getGoogleProvider();
       await signInWithPopup(auth, provider);
-    } catch (error) {
-      console.error('Login error:', error);
+    } catch (error: any) {
+      if (error.code === 'auth/cancelled-popup-request') {
+        console.log('Popup request was already pending or cancelled by a new request.');
+      } else {
+        console.error('Login error:', error);
+      }
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -21,8 +31,8 @@ export function Login() {
         className="max-w-md w-full space-y-8 text-center"
       >
         <div className="flex flex-col items-center gap-4 mb-8">
-          <div className="w-24 h-24 bg-white/10 rounded-3xl flex items-center justify-center text-emerald-400">
-            <ShoppingCart size={48} strokeWidth={1.5} />
+          <div className="w-40 h-40 bg-white/10 rounded-[40px] flex items-center justify-center text-emerald-400 shadow-2xl border border-white/5">
+            <ShoppingCart size={80} strokeWidth={1.5} />
           </div>
           <div>
             <h1 className="text-4xl font-black tracking-tight">Dukaan<span className="text-emerald-400"> Pro</span></h1>
@@ -36,10 +46,15 @@ export function Login() {
           
           <button
             onClick={handleLogin}
-            className="w-full bg-white text-emerald-900 py-4 rounded-2xl font-black flex items-center justify-center gap-3 active:scale-95 transition-all shadow-xl shadow-black/20"
+            disabled={isLoading}
+            className="w-full bg-white text-emerald-900 py-4 rounded-2xl font-black flex items-center justify-center gap-3 active:scale-95 transition-all shadow-xl shadow-black/20 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <LogIn size={20} />
-            CONTINUE WITH GOOGLE
+            {isLoading ? (
+              <div className="w-6 h-6 border-2 border-emerald-900/30 border-t-emerald-900 rounded-full animate-spin" />
+            ) : (
+              <LogIn size={20} />
+            )}
+            {isLoading ? 'SIGNING IN...' : 'CONTINUE WITH GOOGLE'}
           </button>
 
           <p className="mt-8 text-[10px] text-emerald-300/40 font-bold uppercase tracking-[0.2em]">

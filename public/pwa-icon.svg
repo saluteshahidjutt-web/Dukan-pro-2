@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- Rounded White Background -->
+  <rect width="512" height="512" rx="128" fill="#ffffff"/>
+  
+  <!-- The Bag Shape (Trapezoid) -->
+  <path d="M130 220 L 382 220 L 330 460 L 182 460 Z" fill="#064e3b" />
+  
+  <!-- Handle -->
+  <path d="M190 220 C 190 140, 322 140, 322 220" stroke="#064e3b" stroke-width="32" fill="none" stroke-linecap="round"/>
+  
+  <!-- Internal Facets (White lines matching the logo style) -->
+  <path d="M130 220 L 256 340 L 382 220" stroke="white" opacity="0.15" stroke-width="4" fill="none"/>
+  <path d="M190 460 L 256 340 L 322 460" stroke="white" opacity="0.15" stroke-width="4" fill="none"/>
+  <path d="M130 220 L 190 460" stroke="white" opacity="0.15" stroke-width="4" fill="none"/>
+  <path d="M382 220 L 322 460" stroke="white" opacity="0.15" stroke-width="4" fill="none"/>
+  
+  <!-- The Big Tick (Light Green Gradient style) -->
+  <!-- Outer shadow/depth -->
+  <path d="M180 320 L 260 400 L 460 160" stroke="#064e3b" stroke-width="56" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0.2"/>
+  <!-- Main tick body -->
+  <path d="M180 320 L 260 400 L 460 160" stroke="#4ade80" stroke-width="48" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Top highlight on tick -->
+  <path d="M180 320 L 260 400 L 460 160" stroke="#bef264" stroke-width="16" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0.6"/>
+  
+  <!-- Text "Dukan Pro" at the bottom -->
+  <text x="256" y="490" font-family="Arial, sans-serif" font-weight="900" font-size="60" text-anchor="middle" fill="#064e3b">
+    <tspan fill="#064e3b">Dukan</tspan> <tspan fill="#4ade80">Pro</tspan>
+  </text>
+</svg>
