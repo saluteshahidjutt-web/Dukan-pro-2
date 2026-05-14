@@ -18,24 +18,32 @@ interface DashboardProps {
 
 export function Dashboard({ products, customers, transactions, expenses, settings, onNavigate }: DashboardProps) {
   const [showSalesModal, setShowSalesModal] = React.useState(false);
+  const [confirmDialog, setConfirmDialog] = React.useState<{message: string, action: () => Promise<void>} | null>(null);
 
   const handleReturnTransaction = async (tx: Transaction) => {
-    if (!window.confirm('Are you sure you want to process a return for this transaction?')) return;
-    
-    try {
-      await FirestoreService.processReturn(tx);
-    } catch (e) {
-      alert('Error processing return');
-    }
+    setConfirmDialog({
+      message: 'Are you sure you want to process a return for this transaction?',
+      action: async () => {
+        try {
+          await FirestoreService.processReturn(tx);
+        } catch (e) {
+          alert('Error processing return');
+        }
+      }
+    });
   };
 
   const handleDeleteTransaction = async (tx: Transaction) => {
-    if (!window.confirm('Delete this transaction? Errors in balance or stock must be fixed manually.')) return;
-    try {
-      await FirestoreService.deleteTransaction(tx.id);
-    } catch (e) {
-      alert('Failed to delete');
-    }
+    setConfirmDialog({
+      message: 'Are you sure you want to remove this transaction from the log? It will remain in the customer\'s Khata if applicable.',
+      action: async () => {
+        try {
+          await FirestoreService.clearSingleTransactionFromLog(tx.id);
+        } catch (e) {
+          alert('Failed to remove from log');
+        }
+      }
+    });
   };
 
   // Use local day start for filtering
@@ -45,7 +53,7 @@ export function Dashboard({ products, customers, transactions, expenses, setting
   const todaySales = transactions
     .filter(t => {
       const txDate = new Date(t.createdAt);
-      return !t.isDeleted && txDate.getTime() >= todayStart;
+      return !t.isDeleted && !t.isClearedFromLog && txDate.getTime() >= todayStart;
     })
     .reduce((sum, t) => {
       if (t.type === 'sale') return sum + t.amount;
@@ -54,7 +62,7 @@ export function Dashboard({ products, customers, transactions, expenses, setting
     }, 0);
 
   const totalSalesAllTime = transactions
-    .filter(t => !t.isDeleted)
+    .filter(t => !t.isDeleted && !t.isClearedFromLog)
     .reduce((sum, t) => {
       if (t.type === 'sale') return sum + t.amount;
       if (t.type === 'return') return sum - t.amount;
@@ -74,7 +82,7 @@ export function Dashboard({ products, customers, transactions, expenses, setting
   // Best Selling Products
   const productSalesMap = new Map<string, number>();
   transactions
-    .filter(t => t.type === 'sale' && !t.isDeleted && t.items)
+    .filter(t => t.type === 'sale' && !t.isDeleted && !t.isClearedFromLog && t.items)
     .forEach(t => {
       t.items?.forEach(item => {
         productSalesMap.set(item.productId, (productSalesMap.get(item.productId) || 0) + item.quantity);
@@ -155,7 +163,7 @@ export function Dashboard({ products, customers, transactions, expenses, setting
             sub="Manage Kharcha" 
             icon={<ArrowDownRight size={20} />} 
             onClick={() => onNavigate('expenses')}
-            className="bg-emerald-50 dark:bg-emerald-900/10 !border-emerald-100 dark:!border-emerald-900/30"
+            className="bg-emerald-50 dark:bg-emerald-800/10 !border-emerald-100 dark:!border-emerald-800/30"
           />
           <ActionButton 
             label={t.add_customer} 
@@ -183,8 +191,8 @@ export function Dashboard({ products, customers, transactions, expenses, setting
         <h3 className="text-lg font-bold mb-3 dark:text-white">Mashhoor Products (Top Selling)</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {bestSellingProducts.map(({ product, quantity }: any) => (
-            <div key={product.id} className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-100 dark:border-slate-800 flex items-center gap-4 transition-all hover:shadow-md">
-              <div className="h-12 w-12 bg-emerald-50 dark:bg-emerald-900/20 rounded-xl flex items-center justify-center shrink-0">
+            <div key={product.id} className="bg-white dark:bg-slate-800 p-4 rounded-2xl border border-slate-100 dark:border-slate-700 flex items-center gap-4 transition-all hover:shadow-md">
+              <div className="h-12 w-12 bg-emerald-50 dark:bg-emerald-800/20 rounded-xl flex items-center justify-center shrink-0">
                 {product.image ? (
                   <img src={product.image} alt={product.name} className="h-full w-full object-cover rounded-xl" />
                 ) : (
@@ -216,9 +224,9 @@ export function Dashboard({ products, customers, transactions, expenses, setting
           <motion.div 
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            className="bg-white dark:bg-slate-900 w-full max-w-lg rounded-[32px] overflow-hidden shadow-2xl flex flex-col max-h-[85vh]"
+            className="bg-white dark:bg-slate-800 w-full max-w-lg rounded-[32px] overflow-hidden shadow-2xl flex flex-col max-h-[85vh]"
           >
-            <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50 dark:bg-slate-800/50">
+            <div className="p-4 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-700/50">
               <div>
                 <h3 className="text-xl font-black text-slate-900 dark:text-white uppercase tracking-tighter">
                   {t.total_sales}
@@ -226,7 +234,7 @@ export function Dashboard({ products, customers, transactions, expenses, setting
               </div>
               <button 
                 onClick={() => setShowSalesModal(false)}
-                className="p-2 bg-white dark:bg-slate-900 text-slate-400 rounded-full shadow-sm hover:text-red-500 transition-colors"
+                className="p-2 bg-white dark:bg-slate-800 text-slate-400 rounded-full shadow-sm hover:text-red-500 transition-colors"
               >
                 <X size={20} />
               </button>
@@ -235,10 +243,10 @@ export function Dashboard({ products, customers, transactions, expenses, setting
             <div className="p-4 flex-1 overflow-y-auto no-scrollbar">
               <div className="space-y-3">
                 {transactions
-                  .filter(tx => tx.type === 'sale' && !tx.isDeleted)
+                  .filter(tx => tx.type === 'sale' && !tx.isDeleted && !tx.isClearedFromLog)
                   .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
                   .map(tx => (
-                    <div key={tx.id} className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-700/50 flex justify-between items-center group hover:bg-white dark:hover:bg-slate-800 transition-all hover:shadow-md">
+                    <div key={tx.id} className="p-4 bg-slate-50 dark:bg-slate-700/50 rounded-2xl border border-slate-100 dark:border-slate-600 flex justify-between items-center group hover:bg-white dark:hover:bg-slate-700 transition-all hover:shadow-md">
                       <div className="flex items-center gap-4">
                         <div className={cn(
                           "w-10 h-10 rounded-xl flex items-center justify-center shadow-sm",
@@ -286,7 +294,7 @@ export function Dashboard({ products, customers, transactions, expenses, setting
                     </div>
                   ))}
                 
-                {transactions.filter(tx => tx.type === 'sale' && !tx.isDeleted).length === 0 && (
+                {transactions.filter(tx => tx.type === 'sale' && !tx.isDeleted && !tx.isClearedFromLog).length === 0 && (
                   <div className="text-center py-12">
                     <p className="text-slate-400 font-bold">Abhi tak koi sale nahi hui.</p>
                     <button 
@@ -300,7 +308,7 @@ export function Dashboard({ products, customers, transactions, expenses, setting
               </div>
             </div>
             
-            <div className="p-4 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-100 dark:border-slate-800">
+            <div className="p-4 bg-slate-50 dark:bg-slate-700/50 border-t border-slate-100 dark:border-slate-700">
               <button 
                 onClick={() => setShowSalesModal(false)}
                 className="w-full bg-slate-900 dark:bg-white text-white dark:text-slate-900 py-4 rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl active:scale-95 transition-all"
@@ -309,6 +317,34 @@ export function Dashboard({ products, customers, transactions, expenses, setting
               </button>
             </div>
           </motion.div>
+        </div>
+      )}
+
+      {confirmDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm shadow-2xl">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 max-w-sm w-full border border-slate-100 dark:border-slate-800">
+            <h3 className="text-lg font-black text-slate-800 dark:text-white mb-2">Confirmation Required</h3>
+            <p className="text-sm font-bold text-slate-600 dark:text-slate-400 mb-6">{confirmDialog.message}</p>
+            <div className="flex gap-3">
+              <button 
+                onClick={() => setConfirmDialog(null)}
+                className="flex-1 py-3 px-4 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold text-sm hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={async () => {
+                  if (confirmDialog?.action) {
+                    await confirmDialog.action();
+                  }
+                  setConfirmDialog(null);
+                }}
+                className="flex-1 py-3 px-4 rounded-xl bg-rose-600 text-white font-bold text-sm shadow-lg shadow-rose-200 hover:bg-rose-700 transition-colors"
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -327,7 +363,7 @@ function StatCard({ icon, label, labelUr, value, trend, trendLabel, color, onCli
     <motion.button
       whileTap={{ scale: 0.98 }}
       onClick={onClick}
-      className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-100 dark:border-slate-800 shadow-sm text-left flex flex-col justify-between hover:shadow-md transition-all active:bg-slate-50 dark:active:bg-slate-800 min-h-[140px]"
+      className="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-100 dark:border-slate-700 shadow-sm text-left flex flex-col justify-between hover:shadow-md transition-all active:bg-slate-50 dark:active:bg-slate-700 min-h-[140px]"
     >
       <div>
         <p className="text-xs text-slate-500 dark:text-slate-400 font-bold uppercase tracking-tight">{label}</p>
@@ -335,7 +371,7 @@ function StatCard({ icon, label, labelUr, value, trend, trendLabel, color, onCli
       <div className="mt-2">
         <h3 className={cn("text-2xl font-bold mt-1", colors[color])}>{value}</h3>
         {trend ? (
-          <div className="mt-2 pt-2 border-t border-slate-50 dark:border-slate-800">
+          <div className="mt-2 pt-2 border-t border-slate-50 dark:border-slate-700">
             <p className="text-[10px] text-slate-400 font-bold uppercase tracking-tight">{trendLabel || "Total"}</p>
             <p className="text-sm font-black text-slate-900 dark:text-white">{trend}</p>
           </div>
@@ -352,11 +388,11 @@ function ActionButton({ label, sub, icon, onClick, className, labelClass, subCla
     <button 
       onClick={onClick}
       className={cn(
-        "flex flex-col items-center justify-center bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 min-w-[120px] shadow-sm hover:shadow-md transition-shadow active:bg-slate-50 dark:active:bg-slate-800",
+        "flex flex-col items-center justify-center bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 min-w-[120px] shadow-sm hover:shadow-md transition-shadow active:bg-slate-50 dark:active:bg-slate-700",
         className
       )}
     >
-      <div className={cn("bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 p-2 rounded-xl mb-2", iconClass)}>{icon}</div>
+      <div className={cn("bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 p-2 rounded-xl mb-2", iconClass)}>{icon}</div>
       <span className={cn("text-xs font-bold text-slate-900 dark:text-white leading-tight", labelClass)}>{label}</span>
       <span className={cn("text-[8px] text-slate-400 dark:text-slate-500 uppercase tracking-widest font-black mt-1", subClass)}>{sub}</span>
     </button>

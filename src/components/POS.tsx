@@ -93,6 +93,7 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
 
       if (selectedCustomer) {
         transaction.customerId = selectedCustomer.id;
+        transaction.customerName = selectedCustomer.name;
       } else if (tempCustomer) {
         transaction.customerName = tempCustomer.name;
         transaction.customerPhone = tempCustomer.phone;
@@ -123,9 +124,9 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
       try {
         const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2013/2013-preview.mp3');
         audio.volume = 0.5;
-        audio.play();
+        audio.play()?.catch(e => console.warn('Audio play failed', e));
       } catch (e) {
-        console.warn('Audio play failed', e);
+        console.warn('Audio internal failure', e);
       }
 
       setCurrentTransaction(transaction);
@@ -297,12 +298,12 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
       <div className="flex-1 flex flex-col md:flex-row gap-4 overflow-hidden">
         <div className="flex-1 overflow-y-auto space-y-2 no-scrollbar">
           {filteredProducts.map(p => (
-            <button key={p.id} onClick={() => addToCart(p)} className="w-full bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-slate-100 dark:border-slate-800 flex justify-between items-center shadow-sm active:bg-slate-50 transition-colors">
+            <button key={p.id} onClick={() => addToCart(p)} className="w-full bg-white dark:bg-slate-800 p-2.5 rounded-xl border border-slate-100 dark:border-slate-700 flex justify-between items-center shadow-sm active:bg-slate-50 transition-colors">
               <div className="flex items-center gap-3">
                 {p.image ? (
                   <img src={p.image} alt={p.name} className="h-10 w-10 object-cover rounded-lg" referrerPolicy="no-referrer" />
                 ) : (
-                   <div className="h-10 w-10 bg-slate-100 dark:bg-slate-800 rounded-lg flex items-center justify-center">
+                   <div className="h-10 w-10 bg-slate-100 dark:bg-slate-700 rounded-lg flex items-center justify-center">
                       <ShoppingCart size={16} className="text-slate-300" />
                    </div>
                 )}
@@ -316,16 +317,16 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
           ))}
         </div>
 
-        <div className="w-full md:w-80 flex flex-col bg-slate-100 dark:bg-slate-800 rounded-2xl p-4 overflow-hidden shadow-inner">
+        <div className="w-full md:w-80 flex flex-col bg-slate-100 dark:bg-slate-700 rounded-2xl p-4 overflow-hidden shadow-inner">
           <div className="flex-1 overflow-y-auto space-y-2 no-scrollbar">
             {cart.map(item => (
-              <div key={item.id} className="bg-white dark:bg-slate-900 p-2 rounded-lg flex justify-between items-center shadow-sm">
+              <div key={item.id} className="bg-white dark:bg-slate-800 p-2 rounded-lg flex justify-between items-center shadow-sm">
                 <div className="flex-1 min-w-0 pr-2">
                   <p className="text-xs font-bold truncate text-slate-900 dark:text-white">{item.name}</p>
                   <p className="text-[9px] font-black text-emerald-600">{formatCurrency(item.price)}</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <div className="flex items-center bg-slate-50 dark:bg-slate-800 rounded h-7">
+                  <div className="flex items-center bg-slate-50 dark:bg-slate-700 rounded h-7">
                     <button onClick={() => updateQuantity(item.id, -1)} className="px-1.5 text-slate-500"><Minus size={12}/></button>
                     <span className="text-xs font-black w-4 text-center text-slate-900 dark:text-white">{item.quantity}</span>
                     <button onClick={() => updateQuantity(item.id, 1)} className="px-1.5 text-slate-500"><Plus size={12}/></button>
@@ -344,28 +345,28 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
                 onClick={() => setPaymentType('cash')} 
                 className={cn(
                   "py-2 rounded-lg border font-black text-[9px] transition-all", 
-                  paymentType === 'cash' ? "bg-emerald-600 text-white border-emerald-600" : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 dark:border-slate-800"
+                  paymentType === 'cash' ? "bg-emerald-600 text-white border-emerald-600" : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 dark:border-slate-700"
                 )}
               >{t.cash.toUpperCase()}</button>
               <button 
                 onClick={() => setPaymentType('udhar')} 
                 className={cn(
                    "py-2 rounded-lg border font-black text-[9px] transition-all", 
-                   paymentType === 'udhar' ? "bg-amber-500 text-white border-amber-500" : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 dark:border-slate-800"
+                   paymentType === 'udhar' ? "bg-amber-500 text-white border-amber-500" : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 dark:border-slate-700"
                 )}
               >{t.udhar.toUpperCase()}</button>
               <button 
                 onClick={() => setPaymentType('jazzcash')} 
                 className={cn(
                    "py-2 rounded-lg border font-black text-[9px] transition-all", 
-                   paymentType === 'jazzcash' ? "bg-amber-600 text-white border-amber-600" : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 dark:border-slate-800"
+                   paymentType === 'jazzcash' ? "bg-amber-600 text-white border-amber-600" : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 dark:border-slate-700"
                 )}
               >JAZZCASH</button>
               <button 
                 onClick={() => setPaymentType('easypaisa')} 
                 className={cn(
                    "py-2 rounded-lg border font-black text-[9px] transition-all", 
-                   paymentType === 'easypaisa' ? "bg-emerald-500 text-white border-emerald-500" : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 dark:border-slate-800"
+                   paymentType === 'easypaisa' ? "bg-emerald-500 text-white border-emerald-500" : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 dark:border-slate-700"
                 )}
               >EASYPAISA</button>
               <button 
@@ -373,7 +374,7 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
                   setIsCustomerModalOpen(true);
                   setIsAddingNewCustomer(true);
                 }} 
-                className="col-span-2 py-3 mt-1 rounded-xl border-2 border-dashed border-emerald-200 dark:border-slate-700 bg-emerald-50/30 dark:bg-slate-900 text-emerald-600 dark:text-slate-400 font-black text-[10px] tracking-widest flex items-center justify-center gap-2 hover:bg-emerald-50 hover:border-emerald-500 transition-all shadow-sm active:scale-95"
+                className="col-span-2 py-3 mt-1 rounded-xl border-2 border-dashed border-emerald-200 dark:border-slate-700 bg-emerald-50/30 dark:bg-slate-800 text-emerald-600 dark:text-slate-400 font-black text-[10px] tracking-widest flex items-center justify-center gap-2 hover:bg-emerald-50 hover:border-emerald-500 transition-all shadow-sm active:scale-95"
               >
                 <Plus size={16} /> {settings.language === 'en' ? 'ADD CUSTOMER (NAME/NO)' : (settings.language === 'roman' ? 'NAYA GRAHAK (NAAM/NO)' : t.grahak_new.toUpperCase())}
               </button>
@@ -407,9 +408,9 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
             <motion.div 
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              className="bg-white dark:bg-slate-900 w-full max-w-md rounded-[32px] overflow-hidden shadow-2xl"
+              className="bg-white dark:bg-slate-800 w-full max-w-md rounded-[32px] overflow-hidden shadow-2xl"
             >
-              <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50 dark:bg-slate-800/50">
+              <div className="p-6 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-700/50">
                 <h3 className="text-xl font-black text-slate-900 dark:text-white uppercase tracking-tighter">
                   {isAddingNewCustomer ? t.grahak_new : t.select_customer_title}
                 </h3>
@@ -418,7 +419,7 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
                     setIsCustomerModalOpen(false);
                     setIsAddingNewCustomer(false);
                   }} 
-                  className="p-2 bg-white dark:bg-slate-900 text-slate-400 rounded-full shadow-sm"
+                  className="p-2 bg-white dark:bg-slate-800 text-slate-400 rounded-full shadow-sm"
                 >
                   <Plus className="rotate-45" size={20} />
                 </button>
@@ -432,7 +433,7 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
                       <input 
                         type="text" 
                         placeholder={t.search_placeholder} 
-                        className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-2xl py-4 pl-12 pr-4 text-sm font-bold dark:text-white focus:ring-2 focus:ring-indigo-500 transition-all"
+                        className="w-full bg-slate-50 dark:bg-slate-700 border-none rounded-2xl py-4 pl-12 pr-4 text-sm font-bold dark:text-white focus:ring-2 focus:ring-indigo-500 transition-all"
                         value={customerSearchQuery}
                         onChange={(e) => setCustomerSearchQuery(e.target.value)}
                         autoFocus
@@ -505,7 +506,7 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
                       <input 
                         type="text" 
                         placeholder="e.g. Aslam Bhai" 
-                        className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-2xl py-4 px-6 text-sm font-bold dark:text-white focus:ring-2 focus:ring-emerald-500 transition-all"
+                        className="w-full bg-slate-50 dark:bg-slate-700 border-none rounded-2xl py-4 px-6 text-sm font-bold dark:text-white focus:ring-2 focus:ring-emerald-500 transition-all"
                         value={newCustomer.name}
                         onChange={(e) => setNewCustomer({ ...newCustomer, name: e.target.value })}
                         autoFocus
@@ -516,7 +517,7 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
                       <input 
                         type="tel" 
                         placeholder="e.g. 0300 1234567" 
-                        className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-2xl py-4 px-6 text-sm font-bold dark:text-white focus:ring-2 focus:ring-emerald-500 transition-all"
+                        className="w-full bg-slate-50 dark:bg-slate-700 border-none rounded-2xl py-4 px-6 text-sm font-bold dark:text-white focus:ring-2 focus:ring-emerald-500 transition-all"
                         value={newCustomer.phone}
                         onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })}
                       />

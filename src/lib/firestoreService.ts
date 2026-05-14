@@ -282,14 +282,36 @@ export const FirestoreService = {
     }
   },
 
-  deleteAllTransactions: async () => {
-    // 1. Clear local transactions
-    setLocal(LOCAL_KEYS.TRANSACTIONS, []);
+  clearSingleTransactionFromLog: async (id: string) => {
+    // Update local immediately
+    const transactions = getLocal<Transaction[]>(LOCAL_KEYS.TRANSACTIONS, []);
+    const updatedTransactions = transactions.map(t => 
+      t.id === id ? { ...t, isClearedFromLog: true } : t
+    );
+    setLocal(LOCAL_KEYS.TRANSACTIONS, updatedTransactions);
 
     const userId = auth.currentUser?.uid;
     if (!userId) return;
 
-    // 2. Delete transactions from Firestore for user
+    try {
+      await updateDoc(doc(db, 'transactions', id), { 
+        isClearedFromLog: true 
+      });
+    } catch (e) {
+      handleFirestoreError(e, OperationType.UPDATE, `transactions/${id}`);
+    }
+  },
+
+  deleteAllTransactions: async () => {
+    // 1. Update local transactions
+    const transactions = getLocal<Transaction[]>(LOCAL_KEYS.TRANSACTIONS, []);
+    const updatedTransactions = transactions.map(t => ({ ...t, isClearedFromLog: true }));
+    setLocal(LOCAL_KEYS.TRANSACTIONS, updatedTransactions);
+
+    const userId = auth.currentUser?.uid;
+    if (!userId) return;
+
+    // 2. Mark transactions as cleared from log in Firestore
     try {
       const q = query(
         collection(db, 'transactions'), 
@@ -297,12 +319,14 @@ export const FirestoreService = {
       );
       const snapshot = await getDocs(q);
       
-      // Delete documents
+      // Update documents
       for (const docSnapshot of snapshot.docs) {
-        await deleteDoc(docSnapshot.ref);
+        await updateDoc(docSnapshot.ref, {
+          isClearedFromLog: true
+        });
       }
     } catch (e) {
-      handleFirestoreError(e, OperationType.DELETE, `transactions/all`);
+      handleFirestoreError(e, OperationType.UPDATE, `transactions/all`);
     }
   },
 

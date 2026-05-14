@@ -14,6 +14,9 @@ import {
   LogOut,
   MessageCircle,
   Lock,
+  Unlock,
+  ChevronUp,
+  ChevronDown,
   Wifi,
   WifiOff,
   RefreshCw,
@@ -80,19 +83,27 @@ function MainApp() {
 
     const handleRejection = (event: PromiseRejectionEvent) => {
       console.error("Unhandled Rejection:", event.reason);
-      const msg = typeof event.reason === 'string' ? event.reason : (event.reason?.message || "");
+      
+      let msg = "";
+      if (typeof event.reason === 'string') {
+        msg = event.reason;
+      } else if (event.reason instanceof Error) {
+        msg = event.reason.message;
+      } else {
+        try {
+          msg = JSON.stringify(event.reason);
+        } catch {
+          msg = String(event.reason);
+        }
+      }
       
       // Broadly suppress UI crash for common non-critical errors (auth, network, firebase, aborted)
+      const suppressionTerms = ['Firebase', 'auth', 'permission', '403', 'network', 'aborted', 'quota', 'Offline', 'cancel', 'user-cancelled'];
       const shouldSuppress = 
         !msg ||
-        msg.includes('Firebase') || 
-        msg.includes('auth') || 
-        msg.includes('permission') || 
-        msg.includes('403') ||
-        msg.includes('network') ||
-        msg.includes('aborted') ||
-        msg.includes('quota') ||
-        msg.includes('Offline');
+        suppressionTerms.some(term => msg.toLowerCase().includes(term.toLowerCase())) ||
+        msg === 'null' ||
+        msg === '[object Object]';
         
       if (shouldSuppress) return;
       
@@ -207,6 +218,18 @@ function MainApp() {
   const [isNavHidden, setIsNavHidden] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [signOutConfirm, setSignOutConfirm] = useState(false);
+  const [isNavLocked, setIsNavLocked] = useState(true);
+  const [isHoveringNavTrigger, setIsHoveringNavTrigger] = useState(false);
+  const [isHoveringNav, setIsHoveringNav] = useState(false);
+
+  // Mobile check to bypass hidden logic
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   // Firestore Data Sync
   useEffect(() => {
@@ -477,7 +500,7 @@ function MainApp() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col md:flex-row font-sans transition-colors duration-300">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 flex flex-col md:flex-row font-sans transition-colors duration-300">
       {/* Offline Status Pill */}
       {!isOnline && (
         <div className="fixed top-2 left-1/2 -translate-x-1/2 z-[1000] px-4 py-1.5 bg-rose-600 text-white rounded-full text-[10px] font-black uppercase tracking-widest shadow-lg flex items-center gap-2 animate-pulse">
@@ -574,9 +597,9 @@ function MainApp() {
 
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col h-screen w-full bg-slate-50 dark:bg-slate-950 relative overflow-hidden">
+      <div className="flex-1 flex flex-col h-screen w-full bg-slate-50 dark:bg-slate-900 relative overflow-hidden">
         {/* Top Header - Responsive */}
-        <header className="h-16 md:h-20 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-4 md:px-8 shrink-0 z-20 sticky top-0 md:bg-white/80 dark:md:bg-slate-900/80 md:backdrop-blur-md">
+        <header className="h-16 md:h-20 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between px-4 md:px-8 shrink-0 z-20 sticky top-0 md:bg-white/80 dark:md:bg-slate-800/80 md:backdrop-blur-md">
           <div className="flex items-center gap-3">
             <button 
               onClick={() => {
@@ -773,16 +796,56 @@ function MainApp() {
       </div>
 
       {/* Bottom Navigation */}
-      <nav className={cn(
-        "fixed bottom-0 left-0 right-0 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl border-t border-slate-200 dark:border-slate-800 px-2 py-3 pb-[env(safe-area-inset-bottom,12px)] flex justify-around items-center z-[100] shadow-[0_-10px_40px_-15px_rgba(0,0,0,0.1)] transition-transform duration-300",
-        isNavHidden && "translate-y-full opacity-0 pointer-events-none"
-      )}>
-        <NavItem active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} icon={<LayoutDashboard size={22} />} label={t.home} />
-        <NavItem active={activeTab === 'customers'} onClick={() => setActiveTab('customers')} icon={<Users size={22} />} label={t.customers} />
-        <NavItem active={activeTab === 'pos'} onClick={() => setActiveTab('pos')} icon={<div className="bg-emerald-600 text-white p-3 rounded-2xl shadow-lg shadow-emerald-200 active:scale-90 transition-transform"><ShoppingCart size={22} /></div>} label={t.sale} isCenter />
-        <NavItem active={activeTab === 'inventory'} onClick={() => setActiveTab('inventory')} icon={<Package size={22} />} label={t.stock} />
-        <NavItem active={activeTab === 'reports'} onClick={() => setActiveTab('reports')} icon={<BarChart3 size={22} />} label={t.report} />
-      </nav>
+      {!isNavHidden && (
+        <>
+          {/* Desktop Hover Trigger Zone (Bottom 30px) */}
+          {!isMobile && !isNavLocked && (
+            <div 
+              className="fixed bottom-0 left-0 right-0 h-[30px] z-[120]"
+              onMouseEnter={() => setIsHoveringNavTrigger(true)}
+            />
+          )}
+
+          <div 
+            className={cn(
+              "fixed bottom-0 left-0 right-0 z-[100] transition-transform duration-500 ease-out flex flex-col items-start px-4 md:px-8",
+              (!isMobile && !isNavLocked && !isHoveringNavTrigger && !isHoveringNav) ? "translate-y-[calc(100%-8px)] md:translate-y-[calc(100%-12px)]" : "translate-y-0"
+            )}
+            onMouseEnter={() => setIsHoveringNav(true)}
+            onMouseLeave={() => {
+              setIsHoveringNav(false);
+              setIsHoveringNavTrigger(false);
+            }}
+          >
+            {/* Toggle Control (Desktop Only) - Near Home Button */}
+            <div className="hidden md:flex items-center bg-white/95 dark:bg-slate-800/95 backdrop-blur-xl border border-slate-200 dark:border-slate-700 border-b-0 px-2.5 py-1.5 rounded-t-2xl shadow-[0_-5px_20px_-10px_rgba(0,0,0,0.1)] ml-2 mb-[-1px]">
+              <button 
+                onClick={() => setIsNavLocked(!isNavLocked)}
+                className={cn(
+                  "p-1.5 rounded-lg transition-all active:scale-95", 
+                  isNavLocked 
+                    ? "text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20 shadow-inner" 
+                    : "text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+                )}
+                title={isNavLocked ? "Locked (Stay Up)" : "Unlocked (Hover Mode)"}
+              >
+                {isNavLocked ? <Lock size={16} /> : <Unlock size={16} />}
+              </button>
+            </div>
+
+            <nav className={cn(
+              "w-full bg-white/95 dark:bg-slate-800/95 backdrop-blur-xl border-t border-slate-200 dark:border-slate-700 px-2 py-3 pb-[env(safe-area-inset-bottom,12px)] flex justify-around items-center shadow-[0_-100px_40px_-50px_rgba(0,0,0,0.05)] transition-opacity duration-300 rounded-t-3xl md:rounded-t-none",
+              isNavHidden && "opacity-0 pointer-events-none"
+            )}>
+              <NavItem active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} icon={<LayoutDashboard size={22} />} label={t.home} />
+              <NavItem active={activeTab === 'customers'} onClick={() => setActiveTab('customers')} icon={<Users size={22} />} label={t.customers} />
+              <NavItem active={activeTab === 'pos'} onClick={() => setActiveTab('pos')} icon={<div className="bg-emerald-600 text-white p-3 rounded-2xl shadow-lg shadow-emerald-200 active:scale-90 transition-transform"><ShoppingCart size={22} /></div>} label={t.sale} isCenter />
+              <NavItem active={activeTab === 'inventory'} onClick={() => setActiveTab('inventory')} icon={<Package size={22} />} label={t.stock} />
+              <NavItem active={activeTab === 'reports'} onClick={() => setActiveTab('reports')} icon={<BarChart3 size={22} />} label={t.report} />
+            </nav>
+          </div>
+        </>
+      )}
 
       {/* Double Back Exit Toast */}
       <AnimatePresence>

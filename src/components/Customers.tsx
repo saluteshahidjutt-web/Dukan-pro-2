@@ -207,6 +207,7 @@ export function Customers({
           amount: Math.abs(balanceNum),
           description: `Opening Balance / Shuruati Bakaya`,
           customerId: customerId,
+          customerName: newCustomer.name,
           createdAt: new Date().toISOString()
         };
         await FirestoreService.saveTransaction(transaction);
@@ -240,6 +241,7 @@ export function Customers({
         type: type,
         amount: amount,
         description: entryDescription || (activeEntryType === 'received' ? 'Maine liye' : 'Maine diye'),
+        customerName: selectedCustomer.name,
         createdAt: new Date().toISOString()
       };
 
@@ -266,7 +268,8 @@ export function Customers({
       await FirestoreService.updateCustomer(selectedCustomer.id, {
         balance: newBalance,
         lastTransactionAt: new Date().toISOString(),
-        dueDate: entryDueDate || selectedCustomer.dueDate || null
+        dueDate: entryDueDate || selectedCustomer.dueDate || '',
+        lastTransactionType: type
       });
 
       setEntryAmount('');
@@ -373,8 +376,12 @@ export function Customers({
 
     const reader = new window.FileReader();
     reader.onloadend = async () => {
-      const compressed = await compressImage(reader.result as string);
-      setEntryProof(compressed);
+      try {
+        const compressed = await compressImage(reader.result as string);
+        setEntryProof(compressed);
+      } catch (err) {
+        console.error("Proof compression failed", err);
+      }
     };
     reader.readAsDataURL(file);
   };
@@ -389,7 +396,7 @@ export function Customers({
         exit={{ x: '100%' }}
         className="fixed inset-0 bg-white dark:bg-slate-900 z-[1000] flex flex-col overflow-hidden"
       >
-        <div className="p-3 flex items-center border-b border-slate-100 dark:border-slate-800">
+        <div className="p-3 flex items-center border-b border-slate-100 dark:border-slate-700">
           <button onClick={() => window.history.back()} className="p-2 -ml-2 text-slate-500">
             <ArrowLeft size={24} />
           </button>
@@ -402,7 +409,7 @@ export function Customers({
 
         <div className="flex-1 overflow-y-auto no-scrollbar">
           <div className="p-4 space-y-4">
-            <div className="flex items-center gap-2 border-b-2 border-slate-100 dark:border-slate-800 py-2 transition-colors">
+            <div className="flex items-center gap-2 border-b-2 border-slate-100 dark:border-slate-700 py-2 transition-colors">
               <span className={cn(
                 "text-2xl font-black",
                 activeEntryType === 'received' ? "text-emerald-600" : "text-rose-600"
@@ -428,7 +435,7 @@ export function Customers({
                 placeholder="Notes (optional)"
                 value={entryDescription}
                 onChange={(e) => setEntryDescription(e.target.value)}
-                className="w-full bg-slate-50 dark:bg-slate-800/50 p-2.5 rounded-xl text-sm font-medium border border-transparent focus:border-slate-200 dark:focus:border-slate-700 outline-none"
+                className="w-full bg-slate-50 dark:bg-slate-700/50 p-2.5 rounded-xl text-sm font-medium border border-transparent focus:border-slate-200 dark:focus:border-slate-600 outline-none"
               />
             </div>
 
@@ -829,14 +836,14 @@ export function Customers({
   };
 
   return (
-    <div className="h-full flex flex-col bg-slate-50 dark:bg-slate-950 transition-colors">
+    <div className="h-full flex flex-col bg-slate-50 dark:bg-slate-900 transition-colors">
       <div className="px-4 pt-4 bg-white dark:bg-slate-900">
         <div className="flex gap-3">
           <button 
             onClick={() => setFilterType(filterType === 'dene' ? 'all' : 'dene')}
             className={cn(
-              "flex-1 p-4 rounded-[24px] border-2 transition-all flex flex-col items-center justify-center bg-white dark:bg-slate-900 shadow-sm",
-              filterType === 'dene' ? "border-[#4ade80]" : "border-slate-100 dark:border-slate-800"
+              "flex-1 p-4 rounded-[24px] border-2 transition-all flex flex-col items-center justify-center bg-white dark:bg-slate-800 shadow-sm",
+              filterType === 'dene' ? "border-[#4ade80]" : "border-slate-100 dark:border-slate-700"
             )}
           >
             <span className="text-[24px] font-medium text-[#4ade80] tracking-tight">
@@ -850,8 +857,8 @@ export function Customers({
           <button 
             onClick={() => setFilterType(filterType === 'lene' ? 'all' : 'lene')}
             className={cn(
-              "flex-1 p-4 rounded-[24px] border-2 transition-all flex flex-col items-center justify-center bg-white dark:bg-slate-900 shadow-sm",
-              filterType === 'lene' ? "border-rose-400" : "border-slate-100 dark:border-slate-800"
+              "flex-1 p-4 rounded-[24px] border-2 transition-all flex flex-col items-center justify-center bg-white dark:bg-slate-800 shadow-sm",
+              filterType === 'lene' ? "border-rose-400" : "border-slate-100 dark:border-slate-700"
             )}
           >
             <span className="text-[24px] font-medium text-rose-600 tracking-tight">
@@ -864,13 +871,13 @@ export function Customers({
         </div>
       </div>
 
-      <div className="p-4 bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 flex gap-2 pt-4">
+      <div className="p-4 bg-white dark:bg-slate-800 border-b border-slate-100 dark:border-slate-700 flex gap-2 pt-4">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
           <input 
             type="text" 
             placeholder={t.search_customer} 
-            className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl py-3 pl-10 pr-4 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 dark:text-white"
+            className="w-full bg-slate-50 dark:bg-slate-700 border border-slate-100 dark:border-slate-600 rounded-xl py-3 pl-10 pr-4 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 dark:text-white"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
@@ -898,7 +905,7 @@ export function Customers({
             <motion.div 
               layout
               key={customer.id}
-              className="bg-white dark:bg-slate-900 rounded-2xl p-4 flex items-center justify-between border border-slate-100 dark:border-slate-800 hover:shadow-md transition-shadow cursor-pointer active:scale-[0.98]"
+              className="bg-white dark:bg-slate-800 rounded-2xl p-4 flex items-center justify-between border border-slate-100 dark:border-slate-700 hover:shadow-md transition-shadow cursor-pointer active:scale-[0.98]"
             >
               <div className="flex items-center gap-4 flex-1" onClick={() => { window.history.pushState({subview: true}, ''); setSelectedCustomerId(customer.id); }}>
                 <div className="h-12 w-12 bg-slate-50 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border border-slate-100 dark:border-slate-700 rounded-full flex items-center justify-center font-black text-lg">

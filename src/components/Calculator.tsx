@@ -63,12 +63,12 @@ export function Calculator({ onValueChange, onComplete, initialValue = '', onClo
   };
 
   const btnClass = "rounded-2xl flex items-center justify-center font-black text-xl active:scale-90 transition-all active:bg-slate-200 dark:active:bg-slate-700";
-  const numClass = cn(btnClass, "bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white");
-  const opClass = cn(btnClass, "bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400");
-  const specialClass = cn(btnClass, "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400");
+  const numClass = cn(btnClass, "bg-slate-50 dark:bg-slate-700 text-slate-900 dark:text-white");
+  const opClass = cn(btnClass, "bg-indigo-50 dark:bg-indigo-800/20 text-indigo-600 dark:text-indigo-400");
+  const specialClass = cn(btnClass, "bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400");
 
   return (
-    <div className="bg-white dark:bg-slate-900 w-full p-2 select-none">
+    <div className="bg-white dark:bg-slate-800 w-full p-2 select-none">
       <div className="grid grid-cols-4 grid-rows-5 gap-2 h-[350px]">
         {/* Row 1 */}
         <button onClick={() => handlePress('AC')} className={opClass}>AC</button>

@@ -45,36 +45,40 @@ export function PINScreen({ settings, onSuccess, mode, onBack, onSetupComplete }
 
   useEffect(() => {
     const handleAuth = async () => {
-      if (pin.length === 4) {
-        if (mode === 'unlock' || mode === 'verify_old') {
-          const inputHash = await hashValue(pin);
-          if (inputHash === settings.pinHash) {
-            onSuccess();
-          } else {
-            setError(true);
-            setPin('');
-            // Optional: Vibrate if supported
-            if ('vibrate' in navigator) navigator.vibrate([100, 50, 100]);
-            setTimeout(() => setError(false), 500);
-          }
-        } else if (mode === 'setup') {
-          if (setupStep === 'pin') {
-            setSetupPin(pin);
-            setPin('');
-            setSetupStep('confirm');
-          } else if (setupStep === 'confirm') {
-            if (pin === setupPin) {
-              setPin('');
-              setSetupStep('question');
+      try {
+        if (pin.length === 4) {
+          if (mode === 'unlock' || mode === 'verify_old') {
+            const inputHash = await hashValue(pin);
+            if (inputHash === settings.pinHash) {
+              onSuccess();
             } else {
               setError(true);
               setPin('');
-              setSetupStep('pin');
-              alert('PINs do not match. Try again.');
+              // Optional: Vibrate if supported
+              if ('vibrate' in navigator) navigator.vibrate([100, 50, 100]);
               setTimeout(() => setError(false), 500);
+            }
+          } else if (mode === 'setup') {
+            if (setupStep === 'pin') {
+              setSetupPin(pin);
+              setPin('');
+              setSetupStep('confirm');
+            } else if (setupStep === 'confirm') {
+              if (pin === setupPin) {
+                setPin('');
+                setSetupStep('question');
+              } else {
+                setError(true);
+                setPin('');
+                setSetupStep('pin');
+                alert('PINs do not match. Try again.');
+                setTimeout(() => setError(false), 500);
+              }
             }
           }
         }
+      } catch (err) {
+        console.error("Auth handle failed", err);
       }
     };
     handleAuth();
@@ -82,14 +86,18 @@ export function PINScreen({ settings, onSuccess, mode, onBack, onSetupComplete }
 
   const handleForgotSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const answerHash = await hashValue(securityAnswer.toLowerCase().trim());
-    if (answerHash === settings.securityAnswerHash) {
-      alert('Security verified. App Unlocked. Please update your PIN in settings.');
-      onSuccess();
-    } else {
-      setError(true);
-      alert('Incorrect answer.');
-      setTimeout(() => setError(false), 500);
+    try {
+      const answerHash = await hashValue(securityAnswer.toLowerCase().trim());
+      if (answerHash === settings.securityAnswerHash) {
+        alert('Security verified. App Unlocked. Please update your PIN in settings.');
+        onSuccess();
+      } else {
+        setError(true);
+        alert('Incorrect answer.');
+        setTimeout(() => setError(false), 500);
+      }
+    } catch (err) {
+      console.error("Forgot submit failed", err);
     }
   };
 
@@ -98,9 +106,13 @@ export function PINScreen({ settings, onSuccess, mode, onBack, onSetupComplete }
       alert('Please fill all fields');
       return;
     }
-    const pinHash = await hashValue(setupPin);
-    const answerHash = await hashValue(answer.toLowerCase().trim());
-    onSetupComplete?.(pinHash, question, answerHash);
+    try {
+      const pinHash = await hashValue(setupPin);
+      const answerHash = await hashValue(answer.toLowerCase().trim());
+      onSetupComplete?.(pinHash, question, answerHash);
+    } catch (err) {
+      console.error("Setup finish failed", err);
+    }
   };
 
   if (isForgotMode) {

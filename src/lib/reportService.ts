@@ -178,3 +178,66 @@ export const shareOnWhatsApp = (customer: Customer, transactions: Transaction[],
     const url = `https://wa.me/92${customer.phone}?text=${encodeURIComponent(message)}`;
     window.open(url, '_blank');
 };
+
+export const generateTransactionReportPDF = (
+  transactions: Transaction[],
+  settings: ShopSettings,
+  timeRange: number
+) => {
+  const doc = new jsPDF();
+  const pageWidth = doc.internal.pageSize.width;
+
+  // Header
+  doc.setFontSize(22);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(16, 185, 129); // emerald-600
+  doc.text(settings.name || 'Dukan Pro', 14, 20);
+  
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(100);
+  doc.text('Transaction log / Summary report', pageWidth - 14, 15, { align: 'right' });
+  doc.text(`Range: Last ${timeRange} Days`, pageWidth - 14, 21, { align: 'right' });
+  doc.text(`Date: ${new Date().toLocaleDateString()}`, pageWidth - 14, 27, { align: 'right' });
+
+  // Stats
+  const sales = transactions.filter(t => t.type === 'sale' && !t.isDeleted).reduce((s, t) => s + t.amount, 0);
+  const returns = transactions.filter(t => t.type === 'return' && !t.isDeleted).reduce((s, t) => s + t.amount, 0);
+  const netSales = sales - returns;
+
+  doc.setFontSize(12);
+  doc.setTextColor(30);
+  doc.setFont('helvetica', 'bold');
+  doc.text('Performance Summary', 14, 45);
+
+  doc.setFontSize(10);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Total Sales: Rs. ${sales.toLocaleString()}`, 14, 55);
+  doc.text(`Total Returns: Rs. ${returns.toLocaleString()}`, 14, 62);
+  doc.setFont('helvetica', 'bold');
+  doc.text(`Net Revenue: Rs. ${netSales.toLocaleString()}`, 14, 70);
+
+  // Table
+  const tableData = transactions
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .map(t => [
+      new Date(t.createdAt).toLocaleDateString() + ' ' + new Date(t.createdAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
+      t.description || t.type,
+      t.customerName || '-',
+      t.paymentMethod || '-',
+      t.isDeleted ? 'DELETED' : (t.type === 'return' ? 'RETURN' : 'SUCCESS'),
+      `Rs. ${t.amount.toLocaleString()}`
+    ]);
+
+  autoTable(doc, {
+    startY: 80,
+    head: [['Date & Time', 'Description', 'Customer', 'Method', 'Status', 'Amount']],
+    body: tableData,
+    theme: 'striped',
+    headStyles: { fillColor: [16, 185, 129] },
+    styles: { fontSize: 8 },
+    columnStyles: { 5: { halign: 'right' } }
+  });
+
+  doc.save(`Karobar_Report_${new Date().toISOString().slice(0,10)}.pdf`);
+};

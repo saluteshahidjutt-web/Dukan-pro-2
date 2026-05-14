@@ -97,16 +97,45 @@ export function Settings({ settings, setSettings }: SettingsProps) {
     }
   };
 
-  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const compressLogo = (base64Str: string): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.src = base64Str;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        // Logo needs higher detail: 1200px width
+        const MAX_WIDTH = 1200;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > MAX_WIDTH) {
+          height *= MAX_WIDTH / width;
+          width = MAX_WIDTH;
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { resolve(base64Str); return; }
+        ctx.drawImage(img, 0, 0, width, height);
+        // 0.9 quality for Logo ensures sharpness but keeps it well under 500KB
+        resolve(canvas.toDataURL('image/jpeg', 0.9));
+      };
+      img.onerror = () => resolve(base64Str);
+    });
+  };
+
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      if (file.size > 500000) {
-        alert("Image too large. Please select under 500KB.");
-        return;
-      }
       const reader = new FileReader();
-      reader.onloadend = () => {
-        setSettings({ ...settings, logoUrl: reader.result as string });
+      reader.onloadend = async () => {
+        try {
+          const compressed = await compressLogo(reader.result as string);
+          setSettings({ ...settings, logoUrl: compressed });
+        } catch (err) {
+          console.error("Logo upload compression failed", err);
+        }
       };
       reader.readAsDataURL(file);
     }
@@ -359,7 +388,7 @@ export function Settings({ settings, setSettings }: SettingsProps) {
       </section>
 
       {/* Theme Section */}
-      <section className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-100 dark:border-slate-800 shadow-sm space-y-4">
+      <section className="bg-white dark:bg-slate-800 rounded-3xl p-6 border border-slate-100 dark:border-slate-700 shadow-sm space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
              <div className="bg-slate-900 dark:bg-white text-white dark:text-slate-900 p-2 rounded-xl">
@@ -386,7 +415,7 @@ export function Settings({ settings, setSettings }: SettingsProps) {
       </section>
 
       {/* App Security Section */}
-      <section className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-100 dark:border-slate-800 shadow-sm space-y-4">
+      <section className="bg-white dark:bg-slate-800 rounded-3xl p-6 border border-slate-100 dark:border-slate-700 shadow-sm space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
              <div className="bg-indigo-600 text-white p-2 rounded-xl"><Lock size={20}/></div>
@@ -430,10 +459,10 @@ export function Settings({ settings, setSettings }: SettingsProps) {
       )}
 
       {/* Shop Profile */}
-      <section className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-100 dark:border-slate-800 shadow-sm space-y-4">
+      <section className="bg-white dark:bg-slate-800 rounded-3xl p-6 border border-slate-100 dark:border-slate-700 shadow-sm space-y-4">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-3">
-             <div className="bg-slate-900 dark:bg-slate-800 text-white rounded-xl overflow-hidden flex items-center justify-center w-12 h-12 shadow-lg border border-slate-700/50">
+             <div className="bg-slate-900 dark:bg-slate-700 text-white rounded-xl overflow-hidden flex items-center justify-center w-12 h-12 shadow-lg border border-slate-600/50">
                {settings.logoUrl ? (
                  <img src={settings.logoUrl} alt="Logo" className="w-full h-full object-contain p-1 bg-white" />
                ) : (
@@ -470,7 +499,7 @@ export function Settings({ settings, setSettings }: SettingsProps) {
             <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Shop Name / Dukaan Ka Naam</label>
             <input 
               type="text" 
-              className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl py-3 px-4 mt-1 text-sm font-bold dark:text-white focus:ring-2 focus:ring-slate-200 dark:focus:ring-slate-700"
+              className="w-full bg-slate-50 dark:bg-slate-700 border-none rounded-xl py-3 px-4 mt-1 text-sm font-bold dark:text-white focus:ring-2 focus:ring-slate-200 dark:focus:ring-slate-600"
               value={settings.name}
               onChange={(e) => setSettings({...settings, name: e.target.value})}
             />
@@ -480,7 +509,7 @@ export function Settings({ settings, setSettings }: SettingsProps) {
             <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Phone Number / Mobile Number</label>
             <input 
               type="tel" 
-              className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl py-3 px-4 mt-1 text-sm font-bold dark:text-white focus:ring-2 focus:ring-slate-200 dark:focus:ring-slate-700"
+              className="w-full bg-slate-50 dark:bg-slate-700 border-none rounded-xl py-3 px-4 mt-1 text-sm font-bold dark:text-white focus:ring-2 focus:ring-slate-200 dark:focus:ring-slate-600"
               value={settings.phone}
               onChange={(e) => setSettings({...settings, phone: e.target.value})}
             />
@@ -490,7 +519,7 @@ export function Settings({ settings, setSettings }: SettingsProps) {
             <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Shop Address / Dukaan Ka Pata</label>
             <input 
               type="text" 
-              className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl py-3 px-4 mt-1 text-sm font-bold dark:text-white focus:ring-2 focus:ring-slate-200 dark:focus:ring-slate-700"
+              className="w-full bg-slate-50 dark:bg-slate-700 border-none rounded-xl py-3 px-4 mt-1 text-sm font-bold dark:text-white focus:ring-2 focus:ring-slate-200 dark:focus:ring-slate-600"
               placeholder="e.g. Shop #12, Market Name, City"
               value={settings.address || ''}
               onChange={(e) => setSettings({...settings, address: e.target.value})}
@@ -501,7 +530,7 @@ export function Settings({ settings, setSettings }: SettingsProps) {
             <label className="text-[10px] font-bold text-slate-400 uppercase ml-1 flex items-center gap-1"><FileText size={10}/> Receipt Footer Message</label>
             <textarea 
               rows={2}
-              className="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl py-3 px-4 mt-1 text-xs dark:text-white focus:ring-2 focus:ring-slate-200 dark:focus:ring-slate-700 resize-none"
+              className="w-full bg-slate-50 dark:bg-slate-700 border-none rounded-xl py-3 px-4 mt-1 text-xs dark:text-white focus:ring-2 focus:ring-slate-200 dark:focus:ring-slate-600 resize-none"
               placeholder='Example: "Visit again!" or your Address'
               value={settings.receiptFooter || ''}
               onChange={(e) => setSettings({...settings, receiptFooter: e.target.value})}
@@ -511,7 +540,7 @@ export function Settings({ settings, setSettings }: SettingsProps) {
       </section>
 
       {/* App Prefs */}
-      <section className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-100 dark:border-slate-800 shadow-sm space-y-4">
+      <section className="bg-white dark:bg-slate-800 rounded-3xl p-6 border border-slate-100 dark:border-slate-700 shadow-sm space-y-4">
         <div className="flex items-center gap-3 mb-2">
            <div className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 p-2 rounded-xl"><Languages size={20}/></div>
            <h3 className="font-bold dark:text-white">{t.language_currency}</h3>
@@ -524,7 +553,7 @@ export function Settings({ settings, setSettings }: SettingsProps) {
               onClick={() => setSettings({...settings, language: lang as any})}
               className={cn(
                 "py-3 rounded-xl border text-[10px] font-bold transition-all",
-                settings.language === lang ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900 border-slate-900 dark:border-white shadow-lg" : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-400"
+                settings.language === lang ? "bg-slate-900 dark:bg-white text-white dark:text-slate-900 border-slate-900 dark:border-white shadow-lg" : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-400"
               )}
             >
               {lang === 'en' ? 'English' : lang === 'ur' ? 'اردو' : 'Roman'}

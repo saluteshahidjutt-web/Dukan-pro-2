@@ -125,27 +125,38 @@ export function Expenses({ expenses, settings }: ExpensesProps) {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
-      reader.onloadend = async () => {
-        const base64 = reader.result as string;
-        // Compress image to ~30-40KB
-        const img = new Image();
-        img.src = base64;
-        img.onload = () => {
-          const canvas = document.createElement('canvas');
-          const MAX_WIDTH = 800;
-          let width = img.width;
-          let height = img.height;
-          if (width > MAX_WIDTH) {
-            height *= MAX_WIDTH / width;
-            width = MAX_WIDTH;
-          }
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          ctx?.drawImage(img, 0, 0, width, height);
-          const compressed = canvas.toDataURL('image/jpeg', 0.3); // High compression
-          setPhoto(compressed);
-        };
+      reader.onloadend = () => {
+        try {
+          const base64 = reader.result as string;
+          // Compress image to ~30-40KB
+          const img = new Image();
+          img.src = base64;
+          img.onload = () => {
+            try {
+              const canvas = document.createElement('canvas');
+              const MAX_WIDTH = 800;
+              let width = img.width;
+              let height = img.height;
+              if (width > MAX_WIDTH) {
+                height *= MAX_WIDTH / width;
+                width = MAX_WIDTH;
+              }
+              canvas.width = width;
+              canvas.height = height;
+              const ctx = canvas.getContext('2d');
+              ctx?.drawImage(img, 0, 0, width, height);
+              const compressed = canvas.toDataURL('image/jpeg', 0.3); // High compression
+              setPhoto(compressed);
+            } catch (err) {
+              console.error("Image processing error:", err);
+            }
+          };
+          img.onerror = (err) => {
+            console.error("Image load error:", err);
+          };
+        } catch (err) {
+          console.error("Reader result processing error:", err);
+        }
       };
       reader.readAsDataURL(file);
     }
@@ -198,7 +209,7 @@ export function Expenses({ expenses, settings }: ExpensesProps) {
   return (
     <div className="space-y-6 pb-20">
       <div className="flex gap-2 items-stretch">
-        <div className="flex-1 bg-white dark:bg-slate-900 rounded-xl p-3 border border-slate-100 dark:border-slate-800 flex items-center gap-3">
+        <div className="flex-1 bg-white dark:bg-slate-800 rounded-xl p-3 border border-slate-100 dark:border-slate-700 flex items-center gap-3">
           <Search size={20} className="text-slate-400" />
           <input 
             type="text" 
@@ -217,13 +228,13 @@ export function Expenses({ expenses, settings }: ExpensesProps) {
       </div>
 
       {/* Expense History List */}
-      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 overflow-hidden shadow-sm">
-        <div className="px-5 py-3 border-b border-slate-50 dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-800/30">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 overflow-hidden shadow-sm">
+        <div className="px-5 py-3 border-b border-slate-50 dark:border-slate-700 flex justify-between items-center bg-slate-50/50 dark:bg-slate-700/30">
           <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">Recent Records</h3>
           <span className="text-[10px] font-black text-slate-900 dark:text-white bg-slate-200 dark:bg-slate-700 px-2 py-0.5 rounded-full">{filteredExpenses.length} Records</span>
         </div>
         
-        <div className="divide-y divide-slate-50 dark:divide-slate-800">
+        <div className="divide-y divide-slate-50 dark:divide-slate-700">
           {filteredExpenses.map((expense) => (
             <div key={expense.id} className="p-4 flex items-center justify-between hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition-colors group">
               <div className="flex flex-col">

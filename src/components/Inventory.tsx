@@ -133,18 +133,23 @@ export function Inventory({ products, setProducts, settings }: InventoryProps) {
       img.src = base64Str;
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        const MAX_WIDTH = 400;
-        if (img.width <= MAX_WIDTH) {
-           resolve(base64Str);
-           return;
+        // Aiming for 30-50KB: 800px width with 0.7 quality is a good sweet spot for JPEG
+        const MAX_WIDTH = 800; 
+        let width = img.width;
+        let height = img.height;
+
+        if (width > MAX_WIDTH) {
+          height *= MAX_WIDTH / width;
+          width = MAX_WIDTH;
         }
-        const scaleSize = MAX_WIDTH / img.width;
-        canvas.width = MAX_WIDTH;
-        canvas.height = img.height * scaleSize;
+
+        canvas.width = width;
+        canvas.height = height;
         const ctx = canvas.getContext('2d');
         if (!ctx) { resolve(base64Str); return; }
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL('image/jpeg', 0.6));
+        ctx.drawImage(img, 0, 0, width, height);
+        // 0.7 quality for JPEG usually results in ~40KB for 800px photos
+        resolve(canvas.toDataURL('image/jpeg', 0.7));
       };
       img.onerror = () => resolve(base64Str);
     });
@@ -156,8 +161,12 @@ export function Inventory({ products, setProducts, settings }: InventoryProps) {
 
     const reader = new window.FileReader();
     reader.onloadend = async () => {
-      const compressed = await compressImage(reader.result as string);
-      setNewProduct(prev => ({ ...prev, image: compressed }));
+      try {
+        const compressed = await compressImage(reader.result as string);
+        setNewProduct(prev => ({ ...prev, image: compressed }));
+      } catch (err) {
+        console.error("Image compression failed", err);
+      }
     };
     reader.readAsDataURL(file);
   };
@@ -171,7 +180,7 @@ export function Inventory({ products, setProducts, settings }: InventoryProps) {
           <input 
             type="text" 
             placeholder={t.search_product} 
-            className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl py-3 pl-10 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all shadow-sm dark:text-white"
+            className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl py-3 pl-10 pr-10 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all shadow-sm dark:text-white"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
@@ -200,13 +209,13 @@ export function Inventory({ products, setProducts, settings }: InventoryProps) {
             const margin = product.price > 0 ? (profit / product.price) * 100 : 0;
 
             return (
-              <div key={product.id} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 flex items-center justify-between group shadow-sm transition-all">
+              <div key={product.id} className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-2xl p-4 flex items-center justify-between group shadow-sm transition-all">
                 <div className="flex items-center gap-3">
                   <div className={cn(
-                    "h-12 w-12 rounded-xl flex items-center justify-center font-bold overflow-hidden border border-slate-100 dark:border-slate-800",
+                    "h-12 w-12 rounded-xl flex items-center justify-center font-bold overflow-hidden border border-slate-100 dark:border-slate-700",
                     product.stock <= product.lowStockThreshold 
                       ? "bg-amber-50 text-amber-500 dark:bg-amber-900/20 dark:text-amber-400" 
-                      : "bg-slate-50 text-slate-400 dark:bg-slate-800 dark:text-slate-500"
+                      : "bg-slate-50 text-slate-400 dark:bg-slate-700 dark:text-slate-500"
                   )}>
                     {product.image ? (
                       <img src={product.image} alt={product.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
@@ -217,7 +226,7 @@ export function Inventory({ products, setProducts, settings }: InventoryProps) {
                   <div>
                     <h4 className="font-bold text-slate-900 dark:text-white text-sm leading-tight">{product.name}</h4>
                     <div className="flex items-center gap-2 mt-1">
-                      <span className="text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 px-1.5 py-0.5 rounded font-bold uppercase">{product.category}</span>
+                      <span className="text-[10px] bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400 px-1.5 py-0.5 rounded font-bold uppercase">{product.category}</span>
                       <span className="text-[10px] text-slate-400 dark:text-slate-500 font-medium">PKR {product.purchasePrice} cost</span>
                     </div>
                     <div className="flex items-center gap-2 mt-1">
@@ -279,7 +288,7 @@ export function Inventory({ products, setProducts, settings }: InventoryProps) {
           >
             <motion.div 
               initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
-              className="bg-white dark:bg-slate-900 w-full max-w-md rounded-t-[32px] sm:rounded-3xl p-6 pb-24 sm:pb-6 overflow-y-auto max-h-[95vh] no-scrollbar"
+              className="bg-white dark:bg-slate-800 w-full max-w-md rounded-t-[32px] sm:rounded-3xl p-6 pb-24 sm:pb-6 overflow-y-auto max-h-[95vh] no-scrollbar"
             >
               <div className="flex justify-between items-center mb-6">
                 <h3 className="text-xl font-black dark:text-white">{editProduct ? 'Edit Product' : 'New Product / Naya Maal'}</h3>
@@ -298,7 +307,7 @@ export function Inventory({ products, setProducts, settings }: InventoryProps) {
                     <input 
                       required
                       type="text" 
-                      className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-800 rounded-xl py-3 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                      className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl py-3 px-4 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
                       placeholder="Enter product name"
                       value={newProduct.name}
                       onChange={(e) => setNewProduct({...newProduct, name: e.target.value})}
@@ -307,7 +316,7 @@ export function Inventory({ products, setProducts, settings }: InventoryProps) {
                   <div>
                     <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Category</label>
                     <select 
-                      className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-800 rounded-xl py-3 px-4 text-sm focus:outline-none"
+                      className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl py-3 px-4 text-sm focus:outline-none"
                       value={newProduct.category}
                       onChange={(e) => setNewProduct({...newProduct, category: e.target.value})}
                     >
@@ -373,7 +382,7 @@ export function Inventory({ products, setProducts, settings }: InventoryProps) {
                     <input 
                       required
                       type="number" 
-                      className="w-full bg-slate-50 dark:bg-slate-800/50 dark:text-white border border-slate-200 dark:border-slate-800 rounded-xl py-3 px-4 text-sm font-black focus:outline-none"
+                      className="w-full bg-slate-50 dark:bg-slate-800/50 dark:text-white border border-slate-200 dark:border-slate-700 rounded-xl py-3 px-4 text-sm font-black focus:outline-none"
                       placeholder="0"
                       value={newProduct.price ?? ''}
                       onChange={(e) => setNewProduct({...newProduct, price: Number(e.target.value)})}
@@ -383,7 +392,7 @@ export function Inventory({ products, setProducts, settings }: InventoryProps) {
                     <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Buy Price (Cost)</label>
                     <input 
                       type="number" 
-                      className="w-full bg-slate-50 dark:bg-slate-800/50 dark:text-white border border-slate-200 dark:border-slate-800 rounded-xl py-3 px-4 text-sm focus:outline-none"
+                      className="w-full bg-slate-50 dark:bg-slate-800/50 dark:text-white border border-slate-200 dark:border-slate-700 rounded-xl py-3 px-4 text-sm focus:outline-none"
                       placeholder="0"
                       value={newProduct.purchasePrice ?? ''}
                       onChange={(e) => setNewProduct({...newProduct, purchasePrice: Number(e.target.value)})}
@@ -393,7 +402,7 @@ export function Inventory({ products, setProducts, settings }: InventoryProps) {
                     <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Stock Qty</label>
                     <input 
                       type="number" 
-                      className="w-full bg-slate-50 dark:bg-slate-800/50 dark:text-white border border-slate-200 dark:border-slate-800 rounded-xl py-3 px-4 text-sm font-bold text-emerald-600 focus:outline-none"
+                      className="w-full bg-slate-50 dark:bg-slate-800/50 dark:text-white border border-slate-200 dark:border-slate-700 rounded-xl py-3 px-4 text-sm font-bold text-emerald-600 focus:outline-none"
                       placeholder="0"
                       value={newProduct.stock ?? ''}
                       onChange={(e) => setNewProduct({...newProduct, stock: Number(e.target.value)})}
@@ -403,7 +412,7 @@ export function Inventory({ products, setProducts, settings }: InventoryProps) {
                     <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Low Stock Alert at</label>
                     <input 
                       type="number" 
-                      className="w-full bg-slate-50 dark:bg-slate-800/50 dark:text-white border border-slate-200 dark:border-slate-800 rounded-xl py-3 px-4 text-sm focus:outline-none"
+                      className="w-full bg-slate-50 dark:bg-slate-800/50 dark:text-white border border-slate-200 dark:border-slate-700 rounded-xl py-3 px-4 text-sm focus:outline-none"
                       placeholder="5"
                       value={newProduct.lowStockThreshold ?? ''}
                       onChange={(e) => setNewProduct({...newProduct, lowStockThreshold: Number(e.target.value)})}
@@ -421,7 +430,7 @@ export function Inventory({ products, setProducts, settings }: InventoryProps) {
                   </button>
                   <button 
                     type="submit"
-                    className="flex-1 bg-slate-900 text-white font-bold py-4 rounded-2xl shadow-lg shadow-slate-100 active:scale-95 transition-transform"
+                    className="flex-1 bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold py-4 rounded-2xl shadow-lg dark:shadow-none shadow-slate-100 active:scale-95 transition-transform"
                   >
                     {editProduct ? 'Update Stock' : 'Add to Stock'}
                   </button>

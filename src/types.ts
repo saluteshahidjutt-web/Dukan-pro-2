@@ -40,6 +40,7 @@ export interface Transaction {
   paymentMethod?: 'cash' | 'jazzcash' | 'easypaisa' | 'udhar' | 'split';
   isDeleted?: boolean;
   deletedAt?: string;
+  isClearedFromLog?: boolean;
   splitDetails?: {
     cash?: number;
     udhar?: number;

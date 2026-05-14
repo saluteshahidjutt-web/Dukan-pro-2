@@ -2,8 +2,9 @@ import React, { useState } from 'react';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts';
 import { Product, Customer, Transaction, ShopSettings, Expense } from '../types';
 import { formatCurrency, cn } from '../lib/utils';
-import { TrendingUp, TrendingDown, DollarSign, Trash2, Calendar, LayoutGrid, Activity, RefreshCw } from 'lucide-react';
+import { TrendingUp, TrendingDown, DollarSign, Trash2, Calendar, LayoutGrid, Activity, RefreshCw, FileText } from 'lucide-react';
 import { FirestoreService } from '../lib/firestoreService';
+import { generateTransactionReportPDF } from '../lib/reportService';
 
 import { translations, Language } from '../lib/translations';
 
@@ -21,44 +22,56 @@ export function Reports({ products, customers, transactions, expenses, settings,
   const [filter, setFilter] = useState<'all' | 'deleted' | 'return' | 'cash' | 'digital'>('all');
   const [chartType, setChartType] = useState<'bar' | 'line'>('bar');
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<{message: string, action: () => Promise<void>} | null>(null);
 
   const t = translations[settings.language as Language || 'en'];
 
   const handleDeleteAllTransactions = async () => {
-    if (!window.confirm('You are all data will be deleted. No option to recover. Are you absolutely sure?')) return;
-    
-    try {
-      await FirestoreService.deleteAllTransactions();
-      alert('All transaction records have been deleted.');
-    } catch (e) {
-      alert('Error deleting all transactions');
-    }
+    setConfirmDialog({
+      message: 'WARNING: This will permanently delete ALL transaction logs. This action cannot be undone. Please ensure you have downloaded your PDF Statement backup first. Proceed?',
+      action: async () => {
+        try {
+          await FirestoreService.deleteAllTransactions();
+          alert('All transaction records have been deleted.');
+        } catch (e) {
+          alert('Error deleting all transactions');
+        }
+      }
+    });
   };
 
   const handleDeleteTransaction = async (tx: Transaction) => {
-    if (!window.confirm('Are you sure you want to delete this transaction? This will not automatically revert stock or customer balance.')) return;
-    
-    try {
-      await FirestoreService.deleteTransaction(tx.id);
-    } catch (e) {
-      alert('Error deleting transaction');
-    }
+    setConfirmDialog({
+      message: 'Are you sure you want to remove this transaction from the log? It will remain in the customer\'s Khata if applicable.',
+      action: async () => {
+        try {
+          await FirestoreService.clearSingleTransactionFromLog(tx.id);
+        } catch (e) {
+          alert('Error deleting transaction');
+        }
+      }
+    });
   };
 
   const handleReturnTransaction = async (tx: Transaction) => {
-    if (!window.confirm('Are you sure you want to process a return for this transaction?')) return;
-    
-    try {
-      await FirestoreService.processReturn(tx);
-    } catch (e) {
-      alert('Error processing return');
-    }
+    setConfirmDialog({
+      message: 'Are you sure you want to process a return for this transaction?',
+      action: async () => {
+        try {
+          await FirestoreService.processReturn(tx);
+        } catch (e) {
+          alert('Error processing return');
+        }
+      }
+    });
   };
 
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - timeRange);
 
   const filteredTxs = transactions.filter(t => { 
+    if (t.isClearedFromLog) return false;
+
     const txDate = new Date(t.createdAt);
     if (txDate < cutoffDate) return false;
     
@@ -120,19 +133,19 @@ export function Reports({ products, customers, transactions, expenses, settings,
     <div className="space-y-6">
       <div className="flex justify-between items-end">
         <h2 className="text-2xl font-black text-slate-900 dark:text-white">{t.reports} <span className="text-sm font-medium text-slate-400 block uppercase tracking-tighter">{t.karobar_summary}</span></h2>
-        <div className="flex gap-1 bg-slate-200 dark:bg-slate-800 p-1 rounded-xl">
+        <div className="flex gap-1 bg-slate-200 dark:bg-slate-700 p-1 rounded-xl">
           <button 
             onClick={() => setTimeRange(7)}
-            className={cn("px-3 py-1.5 rounded-lg text-[10px] font-black transition-all", timeRange === 7 ? "bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm" : "text-slate-500")}
+            className={cn("px-3 py-1.5 rounded-lg text-[10px] font-black transition-all", timeRange === 7 ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm" : "text-slate-500")}
           >7D</button>
           <button 
             onClick={() => setTimeRange(30)}
-            className={cn("px-3 py-1.5 rounded-lg text-[10px] font-black transition-all", timeRange === 30 ? "bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-sm" : "text-slate-500")}
+            className={cn("px-3 py-1.5 rounded-lg text-[10px] font-black transition-all", timeRange === 30 ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-white shadow-sm" : "text-slate-500")}
           >30D</button>
         </div>
       </div>
 
-      <div className="bg-white dark:bg-slate-900 p-6 rounded-3xl border border-slate-100 dark:border-slate-800 shadow-sm">
+      <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm">
         <div className="flex justify-between items-center mb-6">
           <h3 className="font-bold text-slate-500 dark:text-slate-400 uppercase text-[10px] tracking-widest">{t.sale_trends}</h3>
           <div className="flex gap-1">
@@ -187,7 +200,7 @@ export function Reports({ products, customers, transactions, expenses, settings,
       </div>
 
       <div className="grid grid-cols-2 gap-4">
-        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-100 dark:border-slate-800">
+        <div className="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-100 dark:border-slate-700">
            <h4 className="text-[10px] font-bold text-slate-400 uppercase mb-2">Estimated Profit</h4>
            <p className={cn("text-xl font-black", totalProfit >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400")}>{formatCurrency(totalProfit)}</p>
            <div className="flex items-center gap-1 mt-2">
@@ -196,7 +209,7 @@ export function Reports({ products, customers, transactions, expenses, settings,
         </div>
         <div 
           onClick={() => onNavigate('expenses')}
-          className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-100 dark:border-slate-800 cursor-pointer active:scale-95 transition-all"
+          className="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-100 dark:border-slate-700 cursor-pointer active:scale-95 transition-all"
         >
            <h4 className="text-[10px] font-bold text-slate-400 uppercase mb-2">Total Expenses</h4>
            <p className="text-xl font-black text-emerald-600 dark:text-emerald-400">{formatCurrency(totalFilteredExpenses)}</p>
@@ -260,7 +273,11 @@ export function Reports({ products, customers, transactions, expenses, settings,
                   {t.type === 'sale' ? <ArrowUpRight size={16}/> : <ArrowDownRight size={16}/>}
                 </div>
                 <div>
-                  <p className="text-xs font-black text-slate-900 dark:text-white uppercase">{t.description} {t.isDeleted && <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 ml-2">Deleted</span>}</p>
+                  <p className="text-xs font-black text-slate-900 dark:text-white uppercase">
+                    {t.description} 
+                    {t.customerName && <span className="text-indigo-600 dark:text-indigo-400 ml-1">({t.customerName})</span>}
+                    {t.isDeleted && <span className="text-[8px] font-black uppercase px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 ml-2">Deleted</span>}
+                  </p>
                   <p className="text-[10px] text-slate-400 font-medium">{new Date(t.createdAt).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</p>
                 </div>
               </div>
@@ -292,16 +309,52 @@ export function Reports({ products, customers, transactions, expenses, settings,
               </div>
             </div>
           ))}
-          <div className="p-4">
+          <div className="p-4 grid grid-cols-2 gap-3">
+            <button 
+              onClick={() => generateTransactionReportPDF(transactions, settings, 365)}
+              className="group py-3 px-4 bg-indigo-600 text-white rounded-xl font-black text-[11px] uppercase tracking-wider hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-indigo-100 dark:shadow-none active:scale-95"
+            >
+              <FileText size={16} />
+              PDF Statement
+            </button>
             <button 
               onClick={handleDeleteAllTransactions}
-              className="w-full py-3 bg-rose-600 text-white rounded-xl font-black text-sm uppercase tracking-wider hover:bg-rose-700 transition-colors"
+              className="group py-3 px-4 bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 border border-rose-100 dark:border-rose-800 rounded-xl font-black text-[11px] uppercase tracking-wider hover:bg-rose-600 hover:text-white transition-all flex items-center justify-center gap-2 active:scale-95"
             >
-              Delete all record
+              <Trash2 size={16} />
+              Clear Log
             </button>
           </div>
         </div>
       </div>
+
+      {confirmDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm shadow-2xl">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 max-w-sm w-full border border-slate-100 dark:border-slate-800">
+            <h3 className="text-lg font-black text-slate-800 dark:text-white mb-2">Confirmation Required</h3>
+            <p className="text-sm font-bold text-slate-600 dark:text-slate-400 mb-6">{confirmDialog.message}</p>
+            <div className="flex gap-3">
+              <button 
+                onClick={() => setConfirmDialog(null)}
+                className="flex-1 py-3 px-4 rounded-xl border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-bold text-sm hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={async () => {
+                  if (confirmDialog?.action) {
+                    await confirmDialog.action();
+                  }
+                  setConfirmDialog(null);
+                }}
+                className="flex-1 py-3 px-4 rounded-xl bg-rose-600 text-white font-bold text-sm shadow-lg shadow-rose-200 hover:bg-rose-700 transition-colors"
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
