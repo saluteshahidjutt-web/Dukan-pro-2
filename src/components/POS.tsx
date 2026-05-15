@@ -555,7 +555,7 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
             <motion.div 
               initial={{ scale: 0.9, opacity: 0, y: 20 }}
               animate={{ scale: 1, opacity: 1, y: 0 }}
-              className="w-full max-w-sm"
+              className="w-full max-w-lg"
             >
               <div 
                 ref={receiptRef}
@@ -584,7 +584,7 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
                   <div className="text-[10px] text-[#64748b] font-bold uppercase tracking-widest flex flex-col items-center gap-1">
                     <span>{settings.phone}</span>
                     {settings.address && (
-                      <span className="text-[9px] lowercase first-letter:uppercase text-[#94a3b8] italic max-w-[200px]">{settings.address}</span>
+                      <span className="text-[9px] lowercase first-letter:uppercase text-[#94a3b8] italic max-w-xs">{settings.address}</span>
                     )}
                     {(selectedCustomer || tempCustomer) && (
                       <div className="mt-1 px-3 py-1 bg-slate-100 text-slate-900 rounded-full text-[9px] font-black">
