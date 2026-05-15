@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import Papa from 'papaparse';
 import { ShopSettings } from '../types';
 import { Store, Phone, Languages, RefreshCcw, Lock, Shield, Moon, Sun, Image as ImageIcon, FileText, Cloud, LogIn, LogOut, Upload, Mail } from 'lucide-react';
@@ -23,6 +23,29 @@ export function Settings({ settings, setSettings }: SettingsProps) {
   const [activeModal, setActiveModal] = useState<'about' | 'privacy' | 'terms' | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      if (activeModal) {
+        setActiveModal(null);
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [activeModal]);
+
+  const openModal = (modal: 'about' | 'privacy' | 'terms') => {
+    window.history.pushState({ subview: 'settingsModal' }, '');
+    setActiveModal(modal);
+  };
+
+  const closeModal = () => {
+    if (window.history.state?.subview === 'settingsModal') {
+      window.history.back();
+    } else {
+      setActiveModal(null);
+    }
+  };
 
   const t = translations[settings.language as Language || 'en'];
 
@@ -599,29 +622,29 @@ export function Settings({ settings, setSettings }: SettingsProps) {
         </p>
 
         <div className="w-full flex justify-center gap-4 text-xs font-medium text-slate-400 dark:text-slate-500 mb-8 mt-2">
-          <button onClick={() => setActiveModal('about')} className="hover:text-emerald-500 transition-colors">About Us</button>
+          <button onClick={() => openModal('about')} className="hover:text-emerald-500 transition-colors">About Us</button>
           <span>&bull;</span>
-          <button onClick={() => setActiveModal('privacy')} className="hover:text-emerald-500 transition-colors">Privacy Policy</button>
+          <button onClick={() => openModal('privacy')} className="hover:text-emerald-500 transition-colors">Privacy Policy</button>
           <span>&bull;</span>
-          <button onClick={() => setActiveModal('terms')} className="hover:text-emerald-500 transition-colors">Terms & Conditions</button>
+          <button onClick={() => openModal('terms')} className="hover:text-emerald-500 transition-colors">Terms & Conditions</button>
         </div>
       </div>
 
       <LegalModal 
         isOpen={activeModal === 'about'} 
-        onClose={() => setActiveModal(null)}
+        onClose={closeModal}
         title="About Us"
         content={<AboutContent />}
       />
       <LegalModal 
         isOpen={activeModal === 'privacy'} 
-        onClose={() => setActiveModal(null)}
+        onClose={closeModal}
         title="Privacy Policy"
         content={<PrivacyContent />}
       />
       <LegalModal 
         isOpen={activeModal === 'terms'} 
-        onClose={() => setActiveModal(null)}
+        onClose={closeModal}
         title="Terms & Conditions"
         content={<TermsContent />}
       />
