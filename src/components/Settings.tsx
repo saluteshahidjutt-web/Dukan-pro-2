@@ -7,6 +7,8 @@ import { PINScreen } from './PINScreen';
 import { cn } from '../lib/utils';
 import { auth, signInWithPopup, signInWithRedirect, getGoogleProvider, signOut } from '../lib/firebase';
 import { FirestoreService } from '../lib/firestoreService';
+import { LegalModal } from './LegalModal';
+import { AboutContent, PrivacyContent, TermsContent } from './legalPages';
 
 import { translations, Language } from '../lib/translations';
 
@@ -18,6 +20,7 @@ interface SettingsProps {
 export function Settings({ settings, setSettings }: SettingsProps) {
   const [isPINSetupOpen, setIsPINSetupOpen] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [activeModal, setActiveModal] = useState<'about' | 'privacy' | 'terms' | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
 
@@ -589,12 +592,39 @@ export function Settings({ settings, setSettings }: SettingsProps) {
             Beta Version
           </span>
         </div>
-        <p className="text-[9px] text-slate-400 font-bold uppercase tracking-tighter text-center px-6">
+        <p className="text-[9px] text-slate-400 font-bold uppercase tracking-tighter text-center px-6 mb-4">
           Exciting new updates and professional features are coming in the future.
           <br /> 
           <span className="opacity-60">Build 2026.05.12 • Stable Preview</span>
         </p>
+
+        <div className="w-full flex justify-center gap-4 text-xs font-medium text-slate-400 dark:text-slate-500 mb-8 mt-2">
+          <button onClick={() => setActiveModal('about')} className="hover:text-emerald-500 transition-colors">About Us</button>
+          <span>&bull;</span>
+          <button onClick={() => setActiveModal('privacy')} className="hover:text-emerald-500 transition-colors">Privacy Policy</button>
+          <span>&bull;</span>
+          <button onClick={() => setActiveModal('terms')} className="hover:text-emerald-500 transition-colors">Terms & Conditions</button>
+        </div>
       </div>
+
+      <LegalModal 
+        isOpen={activeModal === 'about'} 
+        onClose={() => setActiveModal(null)}
+        title="About Us"
+        content={<AboutContent />}
+      />
+      <LegalModal 
+        isOpen={activeModal === 'privacy'} 
+        onClose={() => setActiveModal(null)}
+        title="Privacy Policy"
+        content={<PrivacyContent />}
+      />
+      <LegalModal 
+        isOpen={activeModal === 'terms'} 
+        onClose={() => setActiveModal(null)}
+        title="Terms & Conditions"
+        content={<TermsContent />}
+      />
     </div>
   );
 }
