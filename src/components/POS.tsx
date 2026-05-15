@@ -601,9 +601,6 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
                     {cart.map(item => (
                       <div key={item.id} className="flex justify-between items-start gap-4">
                         <div className="flex gap-2 flex-1">
-                          {item.image && (
-                            <img src={item.image} alt={item.name} className="h-10 w-10 object-cover rounded shadow-sm border border-slate-50" referrerPolicy="no-referrer" />
-                          )}
                           <div>
                             <p className="text-xs font-black text-[#1e293b] uppercase leading-none mb-1">{item.name}</p>
                             <p className="text-[10px] text-[#94a3b8] font-bold">
