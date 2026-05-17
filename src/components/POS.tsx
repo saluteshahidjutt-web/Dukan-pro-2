@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Trash2, Minus, Plus, Users, CreditCard, ShoppingCart, CheckCircle2, MessageCircle, ChevronRight, Wallet, Printer, Send, Download, Share2, ReceiptText, RefreshCcw } from 'lucide-react';
+import { Search, Trash2, Minus, Plus, Users, CreditCard, ShoppingCart, CheckCircle2, MessageCircle, ChevronRight, Wallet, Printer, Send, Download, Share2, ReceiptText, RefreshCcw, Phone, MapPin } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
 import * as htmlToImage from 'html-to-image';
 import { Product, Customer, Transaction, ShopSettings } from '../types';
 import { formatCurrency, generateId, cn } from '../lib/utils';
@@ -177,7 +178,7 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
       const blob = await (await fetch(dataUrl)).blob();
       const file = new window.File([blob], `receipt-${currentTransaction?.id?.slice(-8) || 'bill'}.png`, { type: 'image/png' });
 
-      if (navigator.share && navigator.canShare({ files: [file] })) {
+      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({
           files: [file],
           title: `Receipt from ${settings.name}`,
@@ -191,6 +192,9 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
       }
     } catch (error) {
       console.error('Error sharing receipt:', error);
+      alert('Sharing fail ho gaya. Falling back to download.');
+      // Final fallback if even the above fails
+      captureReceipt();
     } finally {
       setIsCapturing(false);
     }
@@ -242,23 +246,27 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
   };
 
   const handleQuickAddCustomer = async () => {
-
     if (!newCustomer.name) return;
     
-    const id = generateId();
-    const customer: Customer = {
-      id,
-      name: newCustomer.name,
-      phone: newCustomer.phone,
-      balance: 0,
-      lastTransactionAt: new Date().toISOString()
-    };
+    try {
+      const id = generateId();
+      const customer: Customer = {
+        id,
+        name: newCustomer.name,
+        phone: newCustomer.phone,
+        balance: 0,
+        lastTransactionAt: new Date().toISOString()
+      };
 
-    await FirestoreService.saveCustomer(customer);
-    setSelectedCustomer(customer);
-    setIsAddingNewCustomer(false);
-    setIsCustomerModalOpen(false);
-    setNewCustomer({ name: '', phone: '' });
+      await FirestoreService.saveCustomer(customer);
+      setSelectedCustomer(customer);
+      setIsAddingNewCustomer(false);
+      setIsCustomerModalOpen(false);
+      setNewCustomer({ name: '', phone: '' });
+    } catch (error) {
+      console.error('Failed to add customer:', error);
+      alert('Grahak save karne mein masla hua. Please check entry and try again.');
+    }
   };
 
   const filteredCustomers = customers.filter(c => 
@@ -557,98 +565,124 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
               animate={{ scale: 1, opacity: 1, y: 0 }}
               className="w-full max-w-lg"
             >
-              <div 
-                ref={receiptRef}
-                className="bg-white p-8 relative overflow-hidden"
-                style={{
-                  backgroundColor: '#ffffff',
-                  backgroundImage: 'radial-gradient(#cbd5e1 0.5px, transparent 0.5px)',
-                  backgroundSize: '10px 10px',
-                  boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)'
-                }}
-              >
-                {/* Receipt Zig-Zag Edge Top */}
-                <div className="absolute top-0 left-0 right-0 h-2" style={{ backgroundColor: '#ffffff', clipPath: 'polygon(0% 0%, 5% 100%, 10% 0%, 15% 100%, 20% 0%, 25% 100%, 30% 0%, 35% 100%, 40% 0%, 45% 100%, 50% 0%, 55% 100%, 60% 0%, 65% 100%, 70% 0%, 75% 100%, 80% 0%, 85% 100%, 90% 0%, 95% 100%, 100% 0%)' }} />
-                
-                {/* Content */}
-                <div className="text-center space-y-2 mb-8">
-                  <div className="inline-block bg-[#0f172a] text-white px-3 py-1 text-[10px] font-black uppercase tracking-widest rounded mb-2">
-                    Official Receipt
-                  </div>
-                  {settings.logoUrl && (
-                    <div className="flex justify-center mb-2">
-                      <img src={settings.logoUrl} alt="Logo" className="h-16 w-auto object-contain" referrerPolicy="no-referrer" />
-                    </div>
-                  )}
-                  <h2 className="text-2xl font-black text-[#0f172a] leading-tight uppercase">{settings.name}</h2>
-                  <div className="text-[10px] text-[#64748b] font-bold uppercase tracking-widest flex flex-col items-center gap-1">
-                    <span>{settings.phone}</span>
-                    {settings.address && (
-                      <span className="text-[9px] lowercase first-letter:uppercase text-[#94a3b8] italic max-w-xs">{settings.address}</span>
-                    )}
-                    {(selectedCustomer || tempCustomer) && (
-                      <div className="mt-1 px-3 py-1 bg-slate-100 text-slate-900 rounded-full text-[9px] font-black">
-                        CUSTOMER: {(selectedCustomer || tempCustomer)?.name} {(selectedCustomer || tempCustomer)?.phone ? `(${ (selectedCustomer || tempCustomer)?.phone })` : ''}
-                      </div>
-                    )}
-                    <div className="w-8 h-0.5 bg-[#f1f5f9]" />
-                    <span>{new Date().toLocaleString('en-PK', { dateStyle: 'medium', timeStyle: 'short' })}</span>
-                  </div>
-                </div>
-
-                <div className="border-y-2 border-dashed border-[#e2e8f0] py-6 mb-6">
-                  <div className="space-y-4">
-                    {cart.map(item => (
-                      <div key={item.id} className="flex justify-between items-start gap-4">
-                        <div className="flex gap-2 flex-1">
-                          <div>
-                            <p className="text-xs font-black text-[#1e293b] uppercase leading-none mb-1">{item.name}</p>
-                            <p className="text-[10px] text-[#94a3b8] font-bold">
-                              {item.quantity} x {formatCurrency(item.price)}
-                            </p>
-                          </div>
+                <div 
+                  ref={receiptRef}
+                  className="bg-white p-4 relative overflow-hidden"
+                  style={{
+                    backgroundColor: '#ffffff',
+                    backgroundImage: 'radial-gradient(#e2e8f0 0.5px, transparent 0.5px)',
+                    backgroundSize: '20px 20px',
+                    boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)'
+                  }}
+                >
+                  {/* High-end border accent */}
+                  <div className="absolute top-0 left-0 right-0 h-1 bg-emerald-600" />
+                  
+                  {/* Header Section - Uniform Row Layout */}
+                  <div className="flex justify-between items-start gap-4 mb-3 mt-1">
+                    <div className="flex gap-3 items-start flex-1">
+                      {settings.logoUrl && (
+                        <div className="flex-shrink-0">
+                          <img src={settings.logoUrl} alt="Logo" className="h-14 w-auto object-contain" referrerPolicy="no-referrer" />
                         </div>
-                        <p className="text-xs font-black text-[#0f172a]">
-                          {formatCurrency(item.price * item.quantity)}
-                        </p>
+                      )}
+                      <div>
+                        <div className="inline-block bg-emerald-950 text-white px-2 py-0.5 text-[7px] font-black uppercase tracking-widest rounded-full mb-0.5">
+                          OFFICIAL RECEIPT
+                        </div>
+                        <h2 className="text-xl font-black text-slate-900 leading-none uppercase mb-1 tracking-tight">{settings.name}</h2>
+                        <div className="flex flex-col gap-0.5 text-[9px] text-slate-500 font-bold">
+                          <div className="flex items-center gap-1.5">
+                            <span className="w-3 h-3 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-600"><Phone size={7}/></span>
+                            <span>{settings.phone}</span>
+                            <span className="text-slate-300 mx-1">|</span>
+                            <span className="w-3 h-3 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-600"><CheckCircle2 size={7}/></span>
+                            <span>{new Date().toLocaleString('en-PK', { dateStyle: 'short', timeStyle: 'short' })}</span>
+                          </div>
+                          {settings.address && (
+                            <div className="flex items-center gap-1.5">
+                              <span className="w-3 h-3 rounded-full bg-emerald-50 flex items-center justify-center text-emerald-600"><MapPin size={7}/></span>
+                              <span className="truncate max-w-[200px]">{settings.address}</span>
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    ))}
-                  </div>
-                </div>
+                    </div>
 
-                <div className="space-y-3 mb-8">
-                  <div className="flex justify-between text-[10px] font-bold text-[#94a3b8] uppercase tracking-widest">
-                    <span>Subtotal</span>
-                    <span>{formatCurrency(subtotal)}</span>
+                    {/* Compact Customer Box */}
+                    <div className="w-32 flex-shrink-0">
+                      <div className="bg-slate-50 border border-slate-100 rounded-lg p-2">
+                        <p className="text-[7px] font-black text-slate-400 uppercase tracking-widest mb-0.5 border-b border-slate-200/50 pb-0.5">CUSTOMER</p>
+                        <p className="text-[10px] font-black text-slate-900 leading-tight uppercase truncate">{(selectedCustomer || tempCustomer)?.name || 'Guest'}</p>
+                        <p className="text-[8px] font-bold text-slate-500 truncate">{(selectedCustomer || tempCustomer)?.phone || '-'}</p>
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex justify-between items-baseline">
-                    <span className="text-sm font-black text-[#0f172a] uppercase tracking-tighter">Grand Total</span>
-                    <span className="text-2xl font-black text-[#059669]">
-                      {formatCurrency(total, settings.currency)}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-[10px] font-black text-[#0f172a] uppercase pt-2 border-t border-[#f1f5f9]">
-                    <span>Paid Via</span>
-                    <span className="px-2 py-0.5 bg-[#f1f5f9] rounded">{paymentType.toUpperCase()}</span>
-                  </div>
-                </div>
 
-                <div className="text-center space-y-4 py-4">
-                  <div className="flex justify-center flex-col items-center gap-1 opacity-20">
-                    <ShoppingCart size={32} color="#0f172a" />
-                    <span className="text-[8px] font-black uppercase tracking-[0.2em]">Verified Transaction</span>
+                  {/* Items Table - More Compact */}
+                  <div className="mb-3 rounded-lg border border-slate-200 overflow-hidden shadow-sm">
+                    <div className="bg-slate-900 px-3 py-1 flex justify-between items-center text-[8px] font-black text-white uppercase tracking-widest">
+                      <span className="flex-1">ITEM</span>
+                      <span className="w-24 text-center">QTY × PRICE</span>
+                      <span className="w-20 text-right">TOTAL</span>
+                    </div>
+                    <div className="divide-y divide-slate-100 px-3">
+                      {cart.map(item => (
+                        <div key={item.id} className="py-1.5 flex justify-between items-center text-[10px]">
+                          <span className="flex-1 font-bold text-slate-800 uppercase pr-2 truncate">{item.name}</span>
+                          <span className="w-24 text-center text-slate-500 font-bold tabular-nums">
+                            {item.quantity} × {formatCurrency(item.price).replace('Rs.', '').trim()}
+                          </span>
+                          <span className="w-20 text-right font-black text-slate-900 tabular-nums">
+                            {formatCurrency(item.price * item.quantity)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <p className="text-[10px] font-black text-[#1e293b] uppercase tracking-widest">
-                    Receipt #{currentTransaction?.id?.slice(-8).toUpperCase()}
-                  </p>
-                  <p className="text-[9px] text-[#94a3b8] font-bold uppercase leading-relaxed whitespace-pre-wrap">
-                    {settings.receiptFooter || "Thank you for shopping with us!\nCome back soon."}
-                  </p>
-                </div>
 
-                {/* Receipt Zig-Zag Edge Bottom */}
-                <div className="absolute bottom-0 left-0 right-0 h-2" style={{ backgroundColor: '#ffffff', clipPath: 'polygon(0% 100%, 5% 0%, 10% 100%, 15% 0%, 20% 100%, 25% 0%, 30% 100%, 35% 0%, 40% 100%, 45% 0%, 50% 100%, 55% 0%, 60% 100%, 65% 0%, 70% 100%, 75% 0%, 80% 100%, 85% 0%, 90% 100%, 95% 0%, 100% 100%)' }} />
-              </div>
+                  {/* Summary Section - Ultra Compact */}
+                  <div className="flex justify-between items-center gap-4 bg-slate-50/50 p-2 rounded-lg border border-dashed border-slate-200">
+                    <div className="flex-1">
+                      <p className="text-[8px] text-slate-400 font-bold uppercase leading-tight whitespace-pre-wrap">
+                        {settings.receiptFooter || "Thank you for shopping!\nCome back soon."}
+                      </p>
+                    </div>
+
+                    <div className="w-40 space-y-0.5">
+                      <div className="flex justify-between items-center text-[7px] font-bold text-slate-400 uppercase tracking-widest border-b border-white pb-0.5">
+                        <span>PAID VIA {paymentType.toUpperCase()}</span>
+                        <span className="text-slate-600 font-black">{formatCurrency(total)}</span>
+                      </div>
+                      <div className="flex justify-between items-center pt-0.5">
+                        <span className="text-[10px] font-black text-slate-900 uppercase">TOTAL</span>
+                        <span className="text-sm font-black text-emerald-600 tabular-nums">
+                          {formatCurrency(total)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Clean Footer Section */}
+                  <div className="mt-3 pt-2 border-t border-slate-100 flex justify-between items-end">
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-[8px] font-black uppercase text-slate-400">Powered by Dukan Pro</span>
+                      <span className="text-[9px] font-black text-slate-900 tracking-wider">
+                        RECEIPT #{currentTransaction?.id?.slice(-8).toUpperCase()}
+                      </span>
+                    </div>
+                    
+                    <div className="flex flex-col items-end gap-1">
+                      <div className="p-0.5 bg-white border border-slate-100 rounded">
+                        <QRCodeSVG value="https://dukanpro.netlify.app/" size={24} />
+                      </div>
+                      <span className="text-[7px] text-indigo-600 lowercase font-bold">dukanpro.netlify.app</span>
+                    </div>
+                  </div>
+
+                  {/* Bottom Border Accent */}
+                  <div className="absolute bottom-0 left-0 right-0 h-1 bg-slate-100" />
+                </div>
 
               <div className="mt-8 grid grid-cols-2 gap-3">
                 <button 
