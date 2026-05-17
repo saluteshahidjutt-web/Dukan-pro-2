@@ -618,7 +618,7 @@ export function Settings({ settings, setSettings }: SettingsProps) {
         <p className="text-[9px] text-slate-400 font-bold uppercase tracking-tighter text-center px-6 mb-4">
           Exciting new updates and professional features are coming in the future.
           <br /> 
-          <span className="opacity-60">Build 2026.05.12 • Stable Preview</span>
+          <span className="opacity-60">Build 2026.05.17 • Stable Preview</span>
         </p>
 
         <div className="w-full flex justify-center gap-4 text-xs font-medium text-slate-400 dark:text-slate-500 mb-8 mt-2">
