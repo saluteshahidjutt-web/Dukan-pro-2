@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Trash2, Minus, Plus, Users, CreditCard, ShoppingCart, CheckCircle2, MessageCircle, ChevronRight, Wallet, Printer, Send, Download, Share2, ReceiptText, RefreshCcw, Phone, MapPin } from 'lucide-react';
+import { Search, Trash2, Minus, Plus, Users, CreditCard, ShoppingCart, CheckCircle2, MessageCircle, ChevronRight, ChevronDown, ChevronUp, Wallet, Printer, Send, Download, Share2, ReceiptText, RefreshCcw, Phone, MapPin } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import * as htmlToImage from 'html-to-image';
 import { Product, Customer, Transaction, ShopSettings } from '../types';
@@ -35,6 +35,7 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
   const [paymentType, setPaymentType] = useState<'cash' | 'udhar' | 'jazzcash' | 'easypaisa'>('cash');
   const [isReceiptOpen, setIsReceiptOpen] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
+  const [isCartExpanded, setIsCartExpanded] = useState(false);
   const receiptRef = React.useRef<HTMLDivElement>(null);
   const [currentTransaction, setCurrentTransaction] = useState<Transaction | null>(null);
 
@@ -325,8 +326,24 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
           ))}
         </div>
 
-        <div className="w-full md:w-80 flex flex-col bg-slate-100 dark:bg-slate-700 rounded-2xl p-4 overflow-hidden shadow-inner">
-          <div className="flex-1 overflow-y-auto space-y-2 no-scrollbar">
+        <div className="w-full md:w-80 flex flex-col bg-slate-100 dark:bg-slate-700 rounded-2xl p-4 overflow-hidden shadow-inner flex-shrink-0">
+          
+          {cart.length > 0 && (
+            <div className="md:hidden flex justify-center mb-2">
+              <button 
+                onClick={() => setIsCartExpanded(!isCartExpanded)} 
+                className="flex items-center gap-2 text-emerald-600 border border-emerald-200 bg-emerald-50 dark:bg-emerald-900/30 dark:border-emerald-800 px-4 py-1.5 rounded-full font-black text-[10px] tracking-widest uppercase transition-all active:scale-95 shadow-sm"
+              >
+                <span>{cart.reduce((s,i) => s + i.quantity, 0)} Items Selected</span>
+                {isCartExpanded ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+              </button>
+            </div>
+          )}
+
+          <div className={cn(
+            "overflow-y-auto space-y-2 no-scrollbar md:flex-1 md:block",
+            isCartExpanded ? "max-h-48 flex-1" : "hidden"
+          )}>
             {cart.map(item => (
               <div key={item.id} className="bg-white dark:bg-slate-800 p-2 rounded-lg flex justify-between items-center shadow-sm">
                 <div className="flex-1 min-w-0 pr-2">
@@ -623,15 +640,19 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
                   <div className="mb-3 rounded-lg border border-slate-200 overflow-hidden shadow-sm">
                     <div className="bg-slate-900 px-3 py-1 flex justify-between items-center text-[8px] font-black text-white uppercase tracking-widest">
                       <span className="flex-1">ITEM</span>
-                      <span className="w-24 text-center">QTY × PRICE</span>
+                      <span className="w-12 text-center">QTY</span>
+                      <span className="w-16 text-right cursor-default">PRICE</span>
                       <span className="w-20 text-right">TOTAL</span>
                     </div>
                     <div className="divide-y divide-slate-100 px-3">
                       {cart.map(item => (
                         <div key={item.id} className="py-1.5 flex justify-between items-center text-[10px]">
                           <span className="flex-1 font-bold text-slate-800 uppercase pr-2 truncate">{item.name}</span>
-                          <span className="w-24 text-center text-slate-500 font-bold tabular-nums">
-                            {item.quantity} × {formatCurrency(item.price).replace('Rs.', '').trim()}
+                          <span className="w-12 text-center text-slate-600 font-bold tabular-nums">
+                            {item.quantity}
+                          </span>
+                          <span className="w-16 text-right text-slate-500 font-bold tabular-nums">
+                            {formatCurrency(item.price).replace('Rs.', '').trim()}
                           </span>
                           <span className="w-20 text-right font-black text-slate-900 tabular-nums">
                             {formatCurrency(item.price * item.quantity)}
