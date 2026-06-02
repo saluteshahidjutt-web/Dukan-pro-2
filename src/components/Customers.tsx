@@ -116,9 +116,20 @@ export function Customers({
   }, [activeEntryType, isAddingCustomer, selectedCustomerId]);
 
   const selectedCustomer = customers.find(c => c.id === selectedCustomerId);
-  const customerTransactions = transactions
+  const customerTransactionsRaw = transactions
     .filter(t => t.customerId === selectedCustomerId && !t.isDeleted)
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+  let tempBal = 0;
+  const customerTransactions = customerTransactionsRaw.map(t => {
+    const amt = parseFloat(t.amount as any) || 0;
+    if (t.type === 'payment_received' || t.type === 'payment' || t.type === 'return') {
+      tempBal -= amt;
+    } else {
+      tempBal += amt;
+    }
+    return { ...t, runningBalance: tempBal };
+  }).reverse();
 
 
 
@@ -714,6 +725,16 @@ export function Customers({
                       {new Date(t.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}
                     </p>
                     <p className="text-[10px] text-slate-400 font-medium">{new Date(t.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>
+                    {(t as any).runningBalance !== undefined && (
+                      <p className={cn(
+                        "text-[9px] font-bold mt-0.5 inline-block px-1.5 py-[1px] rounded border",
+                        (t as any).runningBalance > 0 ? "bg-rose-50 border-rose-100 text-rose-600" : 
+                        (t as any).runningBalance < 0 ? "bg-emerald-50 border-emerald-100 text-emerald-600" : 
+                        "bg-slate-50 border-slate-100 text-slate-500"
+                      )}>
+                        Bal. {settings.currency} {Math.abs((t as any).runningBalance).toLocaleString()}
+                      </p>
+                    )}
                     <div className="flex flex-wrap gap-1 mt-1">
                       {t.description && <p className="text-[10px] text-emerald-600 bg-emerald-50 inline-block px-1 rounded">{t.description}</p>}
                       {t.dueDate && (
