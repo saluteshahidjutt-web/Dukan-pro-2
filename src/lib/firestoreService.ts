@@ -496,6 +496,54 @@ export const FirestoreService = {
     );
   },
 
+  // --- Remote Scanner Sessions (Phone Scanner Bridge) ---
+  listenToScannerSession: (shopId: string, callback: (barcode: string) => void) => {
+    // Listens for incoming barcodes from the Mobile App
+    const sessionRef = doc(db, 'scanner_sessions', shopId);
+    return onSnapshot(sessionRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        if (data.current_barcode && data.current_barcode.trim() !== '') {
+          callback(data.current_barcode);
+        }
+      }
+    });
+  },
+
+  resetScannerSession: async (shopId: string) => {
+    // Clears the barcode after processing so the next item can be scanned
+    try {
+      const sessionRef = doc(db, 'scanner_sessions', shopId);
+      await setDoc(sessionRef, { current_barcode: '' }, { merge: true });
+    } catch (e) {
+      console.error('Failed to reset scanner session', e);
+    }
+  },
+
+  setPCActiveState: async (shopId: string, isActive: boolean) => {
+    try {
+      const sessionRef = doc(db, 'scanner_sessions', shopId);
+      await setDoc(sessionRef, { 
+        pc_status: isActive ? 'active' : 'idle',
+        last_pc_action: Date.now()
+      }, { merge: true });
+    } catch (e) {
+      console.error('Failed to update PC active state', e);
+    }
+  },
+
+  updateMobileBarcode: async (shopId: string, barcode: string) => {
+    try {
+      const sessionRef = doc(db, 'scanner_sessions', shopId);
+      await setDoc(sessionRef, { 
+        current_barcode: barcode,
+        last_scanned_at: Date.now()
+      }, { merge: true });
+    } catch (e) {
+      console.error('Failed to update scanned barcode from mobile', e);
+    }
+  },
+
   // --- Expenses ---
   getExpenses: async () => {
     const userId = auth.currentUser?.uid;

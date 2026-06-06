@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
-import { Search, Plus, Trash2, Image as ImageIcon, MoreVertical, Edit2, AlertCircle, Package } from 'lucide-react';
+import { Search, Plus, Trash2, Image as ImageIcon, MoreVertical, Edit2, AlertCircle, Package, QrCode, Scan } from 'lucide-react';
 import { Product, ShopSettings } from '../types';
 import { formatCurrency, generateId, cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { ConfirmModal } from './ConfirmModal';
 import { FirestoreService } from '../lib/firestoreService';
+import { BarcodeScanner } from './BarcodeScanner';
 
 import { translations, Language } from '../lib/translations';
 
@@ -20,6 +21,7 @@ export function Inventory({ products, setProducts, settings }: InventoryProps) {
   const [editProduct, setEditProduct] = useState<Product | null>(null);
   const [deletingProductId, setDeletingProductId] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isScanningBarcode, setIsScanningBarcode] = useState(false);
 
   // Sync local sub-views with browser history for Back Button support
   React.useEffect(() => {
@@ -76,8 +78,13 @@ export function Inventory({ products, setProducts, settings }: InventoryProps) {
 
     setIsProcessing(true);
     try {
+      const finalBarcode = (newProduct.barcode || '').trim();
       if (editProduct) {
-        await FirestoreService.saveProduct({ ...editProduct, ...newProduct } as Product);
+        await FirestoreService.saveProduct({ 
+          ...editProduct, 
+          ...newProduct, 
+          barcode: finalBarcode || editProduct.barcode 
+        } as Product);
       } else {
         const product: Product = {
           id: generateId(),
@@ -86,7 +93,7 @@ export function Inventory({ products, setProducts, settings }: InventoryProps) {
           price: Number(newProduct.price),
           purchasePrice: Number(newProduct.purchasePrice),
           stock: Number(newProduct.stock),
-          barcode: newProduct.barcode || generateId(),
+          barcode: finalBarcode || generateId(),
           image: newProduct.image || '',
           lowStockThreshold: Number(newProduct.lowStockThreshold) || 5
         };
@@ -329,6 +336,26 @@ export function Inventory({ products, setProducts, settings }: InventoryProps) {
                       <option>Other</option>
                     </select>
                   </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Barcode / Code</label>
+                    <div className="relative">
+                      <input 
+                        type="text" 
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl py-3 pl-4 pr-10 text-sm focus:outline-none dark:text-white"
+                        placeholder="Type or scan code"
+                        value={newProduct.barcode || ''}
+                        onChange={(e) => setNewProduct({...newProduct, barcode: e.target.value})}
+                      />
+                      <button 
+                        type="button"
+                        onClick={() => setIsScanningBarcode(true)}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-slate-400 dark:text-slate-300 hover:text-emerald-500 transition-colors"
+                        title="Scan Code"
+                      >
+                        <QrCode size={18} />
+                      </button>
+                    </div>
+                  </div>
                   <div className="col-span-2">
                     <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Product Image</label>
                     <div className="grid grid-cols-2 gap-3">
@@ -449,6 +476,33 @@ export function Inventory({ products, setProducts, settings }: InventoryProps) {
         onConfirm={confirmDeleteProduct}
         onCancel={() => setDeletingProductId(null)}
       />
+
+      {isScanningBarcode && (
+        <BarcodeScanner 
+          onScanSuccess={(code) => {
+            const scannedCode = code.trim();
+            const existingProduct = products.find(p => p.barcode && p.barcode.toLowerCase() === scannedCode.toLowerCase());
+            
+            if (existingProduct) {
+              // Show toast
+              const alertDiv = document.createElement('div');
+              alertDiv.className = 'fixed top-24 left-1/2 -translate-x-1/2 bg-amber-500 text-slate-900 font-bold px-6 py-3.5 rounded-[22px] shadow-2xl z-[9999] uppercase tracking-widest text-[11px] animate-bounce';
+              alertDiv.innerText = `Found: ${existingProduct.name}`;
+              document.body.appendChild(alertDiv);
+              setTimeout(() => alertDiv.remove(), 2500);
+
+              // Switch to Edit mode for this product
+              setEditProduct(existingProduct);
+              setNewProduct({...existingProduct});
+              setIsAddingProduct(true);
+            } else {
+              setNewProduct(prev => ({ ...prev, barcode: scannedCode }));
+            }
+            setIsScanningBarcode(false);
+          }}
+          onClose={() => setIsScanningBarcode(false)}
+        />
+      )}
     </div>
   );
 }

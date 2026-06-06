@@ -46,6 +46,7 @@ import { cn } from './lib/utils';
 import { useNetworkStatus } from './lib/hooks';
 
 import { translations, Language } from './lib/translations';
+import { PhoneScannerTerminal } from './components/PhoneScannerTerminal';
 
 export default function App() {
   return <MainApp />;
@@ -63,6 +64,22 @@ function MainApp() {
   const [currentPath, setCurrentPath] = useState('');
   const [renderError, setRenderError] = useState<string | null>(null);
   const [targetCustomerId, setTargetCustomerId] = useState<string | null>(null);
+  const [phoneScannerShopId, setPhoneScannerShopId] = useState<string | null>(null);
+
+  // Parse phone scanner mode parameters
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const scanMode = params.get('scanMode');
+    const shopId = params.get('shopId');
+    if (scanMode === 'phone' && shopId) {
+      setPhoneScannerShopId(shopId);
+    }
+  }, []);
+
+  // Early route exit for Phone Scanning Mode
+  if (phoneScannerShopId) {
+    return <PhoneScannerTerminal shopId={phoneScannerShopId} />;
+  }
 
   // Auth Listener
   useEffect(() => {

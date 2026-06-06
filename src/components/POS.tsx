@@ -1,13 +1,32 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Trash2, Minus, Plus, Users, CreditCard, ShoppingCart, CheckCircle2, MessageCircle, ChevronRight, ChevronDown, ChevronUp, Wallet, Printer, Send, Download, Share2, ReceiptText, RefreshCcw, Phone, MapPin } from 'lucide-react';
+import { Search, Trash2, Minus, Plus, Users, CreditCard, ShoppingCart, CheckCircle2, MessageCircle, ChevronRight, ChevronDown, ChevronUp, Wallet, Printer, Send, Download, Share2, ReceiptText, RefreshCcw, Phone, MapPin, QrCode, Scan, Smartphone, X } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import * as htmlToImage from 'html-to-image';
 import { Product, Customer, Transaction, ShopSettings } from '../types';
 import { formatCurrency, generateId, cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { FirestoreService } from '../lib/firestoreService';
+import { BarcodeScanner, playBeep, playErrorSound } from './BarcodeScanner';
 
 import { translations, Language } from '../lib/translations';
+
+const normalizeBarcode = (code: any): string => {
+  if (!code) return '';
+  return String(code).trim().replace(/[\r\n\s\t]+/g, '').toLowerCase();
+};
+
+const isBarcodeMatch = (b1: string, b2: string): boolean => {
+  const norm1 = normalizeBarcode(b1);
+  const norm2 = normalizeBarcode(b2);
+  if (!norm1 || !norm2) return false;
+  if (norm1 === norm2) return true;
+  
+  // Strip leading zeros for UPC/EAN standard matches
+  const strip1 = norm1.replace(/^0+/, '');
+  const strip2 = norm2.replace(/^0+/, '');
+  if (strip1 && strip2 && strip1 === strip2) return true;
+  return false;
+};
 
 interface POSProps {
   products: Product[];
@@ -38,6 +57,78 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
   const [isCartExpanded, setIsCartExpanded] = useState(false);
   const receiptRef = React.useRef<HTMLDivElement>(null);
   const [currentTransaction, setCurrentTransaction] = useState<Transaction | null>(null);
+  const [isScanningCamera, setIsScanningCamera] = useState(false);
+  const [remoteScannerActive, setRemoteScannerActive] = useState(false);
+  const [isPhoneModalOpen, setIsPhoneModalOpen] = useState(false);
+  const [shopId, setShopId] = useState('');
+  const [duplicateProduct, setDuplicateProduct] = useState<CartItem | null>(null);
+  const [duplicateTempQty, setDuplicateTempQty] = useState(1);
+
+  // Auto-sync duplicate proposing count
+  useEffect(() => {
+    if (duplicateProduct) {
+      setDuplicateTempQty(duplicateProduct.quantity + 1);
+    }
+  }, [duplicateProduct]);
+
+  // Optional: Listen for mobile Phone Barcode Scans via Firestore real-time listener
+  React.useEffect(() => {
+    // Note: auth.currentUser?.uid is the Shop ID here.
+    let unsubscribe: () => void = () => {};
+    
+    import('../lib/firebase').then(({ auth }) => {
+      const currentShopId = auth.currentUser?.uid;
+      if (!currentShopId) return;
+      
+      setShopId(currentShopId);
+      
+      // Set PC is actively listening
+      FirestoreService.setPCActiveState(currentShopId, true);
+
+      unsubscribe = FirestoreService.listenToScannerSession(currentShopId, (incomingBarcode) => {
+        // We received a barcode from the mobile app!
+        const match = products.find(p => isBarcodeMatch(p.barcode, incomingBarcode));
+        
+        if (match) {
+          addToCart(match);
+          playBeep();
+          
+          // Show quick success visual feedback
+          const alertDiv = document.createElement('div');
+          alertDiv.className = 'fixed top-24 left-1/2 -translate-x-1/2 bg-emerald-500 text-white font-bold px-6 py-3.5 rounded-[22px] shadow-2xl z-[9999] uppercase tracking-widest text-[11px] animate-bounce';
+          alertDiv.innerText = `Mobile Scan: ${match.name}`;
+          document.body.appendChild(alertDiv);
+          setTimeout(() => alertDiv.remove(), 2000);
+        } else {
+          playErrorSound();
+          const alertDiv = document.createElement('div');
+          alertDiv.className = 'fixed top-24 left-1/2 -translate-x-1/2 bg-rose-600 text-white font-bold px-6 py-3.5 rounded-[22px] shadow-2xl z-[9999] uppercase tracking-widest text-[11px] animate-bounce';
+          alertDiv.innerText = `Product not found: ${incomingBarcode}`;
+          document.body.appendChild(alertDiv);
+          setTimeout(() => alertDiv.remove(), 3500);
+        }
+
+        // IMPORTANT: Reset the field immediately so the phone can scan the next item
+        FirestoreService.resetScannerSession(currentShopId);
+      });
+
+      // Show indicator that remote scanner channel is listening
+      setRemoteScannerActive(true);
+    });
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+      // Reset PC state when leaving POS screen
+      if (shopId) {
+        FirestoreService.setPCActiveState(shopId, false);
+      } else {
+        import('../lib/firebase').then(({ auth }) => {
+          const currentShopId = auth.currentUser?.uid;
+          if (currentShopId) FirestoreService.setPCActiveState(currentShopId, false);
+        });
+      }
+    };
+  }, [products, shopId]);
 
   const t = translations[settings.language as Language || 'en'];
 
@@ -46,17 +137,16 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
 
   const filteredProducts = products.filter(p => 
     p.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    p.barcode.includes(searchQuery)
+    normalizeBarcode(p.barcode).includes(normalizeBarcode(searchQuery))
   );
 
   const addToCart = (product: Product) => {
-    setCart(prev => {
-      const existing = prev.find(item => item.id === product.id);
-      if (existing) {
-        return prev.map(item => item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item);
-      }
-      return [...prev, { ...product, quantity: 1 }];
-    });
+    const existing = cart.find(item => item.id === product.id);
+    if (existing) {
+      setDuplicateProduct(existing);
+      return;
+    }
+    setCart(prev => [...prev, { ...product, quantity: 1 }]);
   };
 
   const updateQuantity = (id: string, delta: number) => {
@@ -282,11 +372,57 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
           <input 
             type="text" placeholder={t.search_product} 
-            className="w-full bg-white border border-slate-200 rounded-xl py-3 pl-10 pr-4 text-sm shadow-sm"
-            value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full bg-white border border-slate-200 rounded-xl py-3 pl-10 pr-12 text-sm shadow-sm dark:bg-slate-800 dark:border-slate-700 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+            value={searchQuery} 
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                // Find product with EXACT barcode match using smart zero-stripping behavior
+                const queryTrim = searchQuery.trim();
+                const match = products.find(p => isBarcodeMatch(p.barcode, queryTrim));
+                if (match) {
+                  addToCart(match);
+                  setSearchQuery('');
+                  
+                  // Play a satisfying beep
+                  playBeep();
+
+                  // Floating success feedback
+                  const alertDiv = document.createElement('div');
+                  alertDiv.className = 'fixed top-20 left-1/2 -translate-x-1/2 bg-slate-900 border border-slate-800 text-white px-6 py-3 rounded-[20px] shadow-2xl z-[200] font-black uppercase tracking-widest text-[10px] animate-bounce';
+                  alertDiv.innerText = `Added: ${match.name}`;
+                  document.body.appendChild(alertDiv);
+                  setTimeout(() => alertDiv.remove(), 1500);
+                } else if (filteredProducts.length === 1) {
+                  addToCart(filteredProducts[0]);
+                  setSearchQuery('');
+                }
+              }
+            }}
           />
+          <button 
+            type="button"
+            onClick={() => setIsScanningCamera(true)}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-emerald-500 transition-colors p-1"
+            title="Scan Barcode"
+          >
+            <QrCode size={18} />
+          </button>
         </div>
         <div className="flex items-center gap-2">
+          {/* Mobile phone scanner connection button */}
+          <button 
+            type="button"
+            onClick={() => setIsPhoneModalOpen(true)}
+            className="px-4 py-3 rounded-xl border bg-slate-900 border-slate-800 hover:bg-slate-800 text-emerald-400 dark:bg-slate-800 dark:border-slate-700 dark:hover:bg-slate-700 flex items-center gap-2 text-xs font-black uppercase transition-all tracking-widest shadow-md active:scale-[0.98]"
+            title="Connect Smartphone Camera as Barcode Gun"
+          >
+            <Smartphone size={16} className="animate-pulse" />
+            <span className="hidden lg:inline">MOBILE SCANNER</span>
+            <span className="lg:hidden">PHONE</span>
+          </button>
+
           <button 
             onClick={() => setIsCustomerModalOpen(true)}
             className={cn("px-4 py-3 rounded-xl border flex items-center gap-2 text-xs font-black uppercase transition-all tracking-widest", selectedCustomer ? "bg-indigo-600 text-white border-indigo-600 shadow-lg shadow-indigo-100" : "bg-white text-slate-600 border-slate-200 shadow-sm")}
@@ -458,39 +594,47 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
                       <input 
                         type="text" 
                         placeholder={t.search_placeholder} 
-                        className="w-full bg-slate-50 dark:bg-slate-700 border-none rounded-2xl py-4 pl-12 pr-4 text-sm font-bold dark:text-white focus:ring-2 focus:ring-indigo-500 transition-all"
+                        className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200/60 dark:border-slate-700/60 rounded-2xl py-3.5 pl-12 pr-4 text-sm font-semibold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all shadow-sm"
                         value={customerSearchQuery}
                         onChange={(e) => setCustomerSearchQuery(e.target.value)}
                         autoFocus
                       />
                     </div>
 
-                    <div className="max-h-60 overflow-y-auto space-y-2 no-scrollbar">
+                    <div className="max-h-64 overflow-y-auto space-y-2 no-scrollbar pr-1">
                       {filteredCustomers.length > 0 ? (
-                        filteredCustomers.map(c => (
-                          <button 
-                            key={c.id} 
-                            onClick={() => {
-                              setSelectedCustomer(c); 
-                              setIsCustomerModalOpen(false);
-                              if (paymentType === 'cash') setPaymentType('udhar');
-                            }} 
-                            className="w-full text-left p-4 rounded-2xl hover:bg-slate-50 dark:hover:bg-slate-800 border border-transparent hover:border-slate-100 dark:hover:border-slate-700 transition-all group"
-                          >
-                            <div className="flex justify-between items-center">
-                              <div>
-                                <p className="font-black text-slate-900 dark:text-white group-hover:text-indigo-600 transition-colors">{c.name}</p>
-                                <p className="text-[10px] text-slate-400 font-bold tracking-widest">{c.phone}</p>
+                        filteredCustomers.map(c => {
+                          const initials = c.name.trim().split(' ').filter(Boolean).map(n => n[0]).join('').slice(0, 2).toUpperCase() || 'C';
+                          return (
+                            <button 
+                              key={c.id} 
+                              onClick={() => {
+                                setSelectedCustomer(c); 
+                                setIsCustomerModalOpen(false);
+                                if (paymentType === 'cash') setPaymentType('udhar');
+                              }} 
+                              className="w-full text-left p-3.5 rounded-2xl hover:bg-emerald-50/40 dark:hover:bg-emerald-950/10 border border-slate-100/50 dark:border-slate-800/80 hover:border-emerald-200/50 dark:hover:border-emerald-900/40 transition-all group flex items-center justify-between"
+                            >
+                              <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-black text-xs flex items-center justify-center border border-slate-200/20 group-hover:bg-emerald-100 group-hover:text-emerald-700 dark:group-hover:bg-emerald-950 dark:group-hover:text-emerald-400 transition-colors">
+                                  {initials}
+                                </div>
+                                <div>
+                                  <p className="font-extrabold text-slate-900 dark:text-white group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors text-sm">{c.name}</p>
+                                  <p className="text-[10px] text-slate-500 dark:text-slate-400 font-bold tracking-wider mt-0.5">{c.phone}</p>
+                                </div>
                               </div>
                               <div className={cn(
-                                "text-xs font-black px-2 py-1 rounded-lg",
-                                c.balance > 0 ? "bg-amber-50 text-amber-600" : "bg-emerald-50 text-emerald-600"
+                                "text-xs font-black px-2.5 py-1 rounded-xl shadow-sm border",
+                                c.balance > 0 
+                                  ? "bg-rose-50 border-rose-100 text-rose-600 dark:bg-rose-950/20 dark:border-rose-900/40 dark:text-rose-400" 
+                                  : "bg-emerald-50 border-emerald-100 text-emerald-600 dark:bg-emerald-950/20 dark:border-emerald-900/40 dark:text-emerald-400"
                               )}>
                                 {formatCurrency(c.balance)}
                               </div>
-                            </div>
-                          </button>
-                        ))
+                            </button>
+                          );
+                        })
                       ) : (
                         <div className="py-8 text-center bg-slate-50 dark:bg-slate-800/50 rounded-2xl">
                           <p className="text-slate-400 font-bold mb-4">{t.no_results}</p>
@@ -507,7 +651,7 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
                           setNewCustomer({ ...newCustomer, phone: customerSearchQuery });
                         }
                       }}
-                      className="w-full flex items-center justify-center gap-2 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 py-4 rounded-2xl font-black text-xs uppercase tracking-widest active:scale-95 transition-all"
+                      className="w-full flex items-center justify-center gap-2 bg-emerald-50 dark:bg-emerald-950/20 hover:bg-emerald-100/50 dark:hover:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 py-3.5 rounded-2xl border border-emerald-100/40 dark:border-emerald-900/30 font-black text-xs uppercase tracking-widest active:scale-[0.98] transition-all"
                     >
                       <Plus size={18} /> {t.grahak_new} {customerSearchQuery ? `"${customerSearchQuery}"` : ''}
                     </button>
@@ -743,6 +887,268 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
           </div>
         )}
       </AnimatePresence>
+
+      {isScanningCamera && (
+        <BarcodeScanner 
+          onScanSuccess={(code) => {
+            const match = products.find(p => isBarcodeMatch(p.barcode, code));
+            if (match) {
+              addToCart(match);
+              
+              // Success feedback toast
+              const alertDiv = document.createElement('div');
+              alertDiv.className = 'fixed top-24 left-1/2 -translate-x-1/2 bg-slate-900 border border-slate-800 text-white px-6 py-3.5 rounded-[22px] shadow-2xl z-[9999] font-black uppercase tracking-widest text-[11px] animate-bounce';
+              alertDiv.innerText = `Added: ${match.name}`;
+              document.body.appendChild(alertDiv);
+              setTimeout(() => alertDiv.remove(), 2000);
+            } else {
+              // Product not found, play pleasant gentle warning alert beep
+              playErrorSound();
+
+              const alertDiv = document.createElement('div');
+              alertDiv.className = 'fixed top-24 left-1/2 -translate-x-1/2 bg-rose-600 border border-rose-500 text-white px-6 py-3.5 rounded-[22px] shadow-2xl z-[9999] font-black uppercase tracking-widest text-[10px] text-center max-w-xs animate-bounce';
+              alertDiv.innerText = `Product not found! Code: ${code}`;
+              document.body.appendChild(alertDiv);
+              setTimeout(() => alertDiv.remove(), 3500);
+            }
+            setIsScanningCamera(false);
+          }}
+          onClose={() => setIsScanningCamera(false)}
+        />
+      )}
+
+      {/* Phone scanner transmitter handshake setup instructions */}
+      <AnimatePresence>
+        {isPhoneModalOpen && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              className="bg-white dark:bg-slate-800 w-full max-w-lg rounded-[36px] overflow-hidden shadow-2xl relative border border-slate-100 dark:border-slate-700/60 p-6 space-y-6"
+            >
+              {/* Header */}
+              <div className="flex justify-between items-start">
+                <div className="flex gap-3 items-center">
+                  <div className="w-12 h-12 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-100 dark:border-emerald-900 text-emerald-600 dark:text-emerald-400 rounded-2xl flex items-center justify-center font-bold">
+                    <Smartphone size={24} className="animate-bounce" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-slate-900 dark:text-white uppercase tracking-tight">Mobile Camera Barcode Gun</h3>
+                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-0.5">Real-time smartphone sync node</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setIsPhoneModalOpen(false)} 
+                  className="p-2.5 bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-600 active:scale-95 transition-all"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Status information */}
+              <div className="bg-emerald-50/55 dark:bg-emerald-950/20 border border-emerald-100/40 dark:border-emerald-900/30 rounded-2xl p-4 flex items-center justify-between text-xs font-bold text-emerald-700 dark:text-emerald-400">
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping inline-block" />
+                  <span>PC ACTIVE & LISTENING</span>
+                </div>
+                <p className="text-[10px] opacity-80">FREE CLOUD STREAM ACTIVE</p>
+              </div>
+
+              {/* Steps grid & QR */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
+                {/* QR Code container */}
+                <div className="bg-slate-50 dark:bg-slate-900/50 p-6 rounded-[28px] border border-slate-100 dark:border-slate-800 flex flex-col items-center justify-center space-y-4">
+                  {shopId ? (
+                    <div className="bg-white p-3.5 rounded-2xl shadow-inner border border-slate-100">
+                      <QRCodeSVG 
+                        value={`${window.location.origin}/?scanMode=phone&shopId=${shopId}`} 
+                        size={160} 
+                        level="M" 
+                      />
+                    </div>
+                  ) : (
+                    <div className="w-40 h-40 bg-slate-200 animate-pulse rounded-2xl" />
+                  )}
+                  <p className="text-[9px] text-slate-500 font-black uppercase text-center tracking-widest">Scan QR with Shop Phone</p>
+                </div>
+
+                {/* Instructions steps */}
+                <div className="space-y-4 text-xs font-medium text-slate-600 dark:text-slate-300">
+                  <div className="flex gap-3">
+                    <div className="w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-700 font-black text-slate-900 dark:text-white flex items-center justify-center shrink-0">1</div>
+                    <p className="leading-relaxed">Apne phone se is **QR code** ko camera ya normal/WhatsApp scan app se scan karein.</p>
+                  </div>
+                  <div className="flex gap-3">
+                    <div className="w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-700 font-black text-slate-900 dark:text-white flex items-center justify-center shrink-0">2</div>
+                    <p className="leading-relaxed">Yeh bina kisi login ke automatic phone camera open kar k scanner bridge connection start karega.</p>
+                  </div>
+                  <div className="flex gap-3">
+                    <div className="w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-700 font-black text-slate-900 dark:text-white flex items-center justify-center shrink-0">3</div>
+                    <p className="leading-relaxed">Ab aap directly mobile se scanning karein; products khud-ba-khud is screen pe add honge!</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action and manual link copy */}
+              <div className="pt-2 flex flex-col sm:flex-row gap-3">
+                <button
+                  onClick={() => {
+                    const url = `${window.location.origin}/?scanMode=phone&shopId=${shopId}`;
+                    navigator.clipboard.writeText(url);
+                    const toast = document.createElement('div');
+                    toast.className = 'fixed bottom-10 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest px-6 py-3.5 rounded-full z-[99999] shadow-2xl';
+                    toast.innerText = 'LINK COPIED TO CLIPBOARD!';
+                    document.body.appendChild(toast);
+                    setTimeout(() => toast.remove(), 2500);
+                  }}
+                  className="flex-1 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-95"
+                >
+                  Copy connection Link
+                </button>
+                <button
+                  onClick={() => {
+                    const url = `${window.location.origin}/?scanMode=phone&shopId=${shopId}`;
+                    window.open(url, '_blank');
+                  }}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-95"
+                >
+                  Open in desktop tab
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {duplicateProduct && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[220] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              className="bg-white dark:bg-slate-800 w-full max-w-md rounded-[36px] overflow-hidden shadow-2xl relative border border-slate-100 dark:border-slate-700/60 p-6 space-y-6 text-slate-900 dark:text-white"
+            >
+              {/* Header */}
+              <div className="flex justify-between items-start">
+                <div className="flex gap-3 items-center">
+                  <div className="w-12 h-12 bg-amber-50 dark:bg-amber-950/40 border border-amber-100 dark:border-amber-900 text-amber-600 dark:text-amber-400 rounded-2xl flex items-center justify-center font-bold">
+                    <ShoppingCart size={22} className="text-amber-500 animate-pulse" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black uppercase tracking-tight">Already in Cart!</h3>
+                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-0.5">Product pehle se cart mein majood hai</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setDuplicateProduct(null)} 
+                  className="p-2.5 bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-600 active:scale-95 transition-all"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Product Info Display Card */}
+              <div className="bg-slate-50 dark:bg-slate-900/40 border border-slate-100 dark:border-slate-800 p-4 rounded-3xl space-y-3.5">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <h4 className="font-extrabold text-sm uppercase leading-snug">{duplicateProduct.name}</h4>
+                    <p className="text-[10px] text-slate-500 font-mono tracking-wider mt-1">SKU/Code: {duplicateProduct.barcode || 'N/A'}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs text-slate-400 font-black tracking-widest uppercase">Unit Price</p>
+                    <p className="text-sm font-black mt-0.5">{formatCurrency(duplicateProduct.price)}</p>
+                  </div>
+                </div>
+
+                {/* Sub Total proposed display */}
+                <div className="pt-3.5 border-t border-dashed border-slate-200 dark:border-slate-700/80 flex justify-between items-center">
+                  <span className="text-[10.5px] font-black uppercase text-slate-400 tracking-wider">Estimated Total</span>
+                  <span className="text-base font-black text-emerald-600 dark:text-emerald-400 font-mono animate-pulse">
+                    {formatCurrency(duplicateProduct.price * duplicateTempQty)}
+                  </span>
+                </div>
+              </div>
+
+              {/* Counter controller */}
+              <div className="flex flex-col items-center justify-center space-y-3 p-2 bg-slate-50/50 dark:bg-slate-900/10 rounded-3xl border border-slate-100/50 dark:border-slate-700/30">
+                <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Adjust Quantity</p>
+                <div className="flex items-center gap-6">
+                  <button 
+                    onClick={() => setDuplicateTempQty(Math.max(1, duplicateTempQty - 1))}
+                    className="w-12 h-12 rounded-full border border-slate-200 dark:border-slate-700 hover:bg-slate-105 dark:hover:bg-slate-705 flex items-center justify-center text-slate-800 dark:text-slate-200 font-black text-xl transition-all active:scale-90"
+                  >
+                    <Minus size={18} />
+                  </button>
+                  <span className="text-2xl font-black font-mono w-14 text-center">
+                    {duplicateTempQty}
+                  </span>
+                  <button 
+                    onClick={() => setDuplicateTempQty(duplicateTempQty + 1)}
+                    className="w-12 h-12 rounded-full border border-slate-200 dark:border-slate-700 hover:bg-slate-105 dark:hover:bg-slate-705 flex items-center justify-center text-slate-800 dark:text-slate-200 font-black text-xl transition-all active:scale-90"
+                  >
+                    <Plus size={18} />
+                  </button>
+                </div>
+                <p className="text-[10px] text-slate-500 font-bold">
+                  Original Quantity: <span className="font-mono">{duplicateProduct.quantity}</span> (Next proposed: <span className="font-mono">{duplicateProduct.quantity + 1}</span>)
+                </p>
+              </div>
+
+              {/* Final Actions */}
+              <div className="space-y-2.5">
+                <button 
+                  onClick={() => {
+                    // Update state inside cart!
+                    setCart(prev => prev.map(item => item.id === duplicateProduct.id ? { ...item, quantity: duplicateTempQty } : item));
+                    setDuplicateProduct(null);
+                  }}
+                  className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest transition-all active:scale-95 shadow-xl shadow-emerald-950/10"
+                >
+                  Haan, Quantity update karo
+                </button>
+                <div className="grid grid-cols-2 gap-3">
+                  <button 
+                    onClick={() => {
+                      // Remove item completely
+                      removeFromCart(duplicateProduct.id);
+                      setDuplicateProduct(null);
+                    }}
+                    className="bg-rose-50 dark:bg-rose-950/20 text-rose-600 dark:text-rose-400 border border-rose-100 dark:border-rose-900/30 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-95"
+                  >
+                    Remove from Cart
+                  </button>
+                  <button 
+                    onClick={() => setDuplicateProduct(null)}
+                    className="bg-slate-100 dark:bg-slate-700 text-slate-850 dark:text-slate-200 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-95"
+                  >
+                    Keep Original
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Floating Action Barcode Scan Button - Fully draggable */}
+      <motion.button 
+        type="button"
+        drag
+        dragElastic={0.05}
+        dragMomentum={false}
+        dragTransition={{ bounceStiffness: 600, bounceDamping: 25 }}
+        whileDrag={{ scale: 1.1, cursor: 'grabbing', zIndex: 110 }}
+        onClick={() => setIsScanningCamera(true)}
+        className="fixed right-6 bottom-24 md:bottom-28 bg-emerald-600 hover:bg-emerald-500 text-white font-bold p-4 rounded-full shadow-2xl active:scale-95 transition-all z-[100] flex items-center justify-center gap-2.5 group border border-emerald-500 hover:shadow-[0_0_24px_rgba(16,185,129,0.6)] animate-pulse hover:animate-none cursor-grab touch-none"
+        title="Scan Barcode - Drag anywhere on screen to move"
+      >
+        <QrCode className="w-6 h-6" />
+        <span className="max-w-0 overflow-hidden group-hover:max-w-xs transition-all duration-300 ease-out text-[11px] font-black uppercase tracking-widest whitespace-nowrap">
+          Scan Barcode
+        </span>
+      </motion.button>
     </div>
   );
 }
