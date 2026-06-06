@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Search, Plus, Trash2, Image as ImageIcon, MoreVertical, Edit2, AlertCircle, Package, QrCode, Scan } from 'lucide-react';
 import { Product, ShopSettings } from '../types';
-import { formatCurrency, generateId, cn } from '../lib/utils';
+import { formatCurrency, generateId, cn, normalizeBarcode, isBarcodeMatch } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { ConfirmModal } from './ConfirmModal';
 import { FirestoreService } from '../lib/firestoreService';
@@ -76,11 +76,11 @@ export function Inventory({ products, setProducts, settings }: InventoryProps) {
     e.preventDefault();
     if (!newProduct.name || newProduct.price === undefined) return;
 
-    const finalBarcode = (newProduct.barcode || '').trim();
+    const finalBarcode = normalizeBarcode(newProduct.barcode || '').trim();
     
     // Check for duplicate barcode
     if (finalBarcode) {
-      const duplicateFound = products.find(p => p.barcode === finalBarcode && p.id !== editProduct?.id);
+      const duplicateFound = products.find(p => isBarcodeMatch(p.barcode, finalBarcode) && p.id !== editProduct?.id);
       if (duplicateFound) {
         alert("Alert: Ye barcode ek aur product '" + duplicateFound.name + "' ko assign hai. Please alag barcode use karein.");
         return;
@@ -490,8 +490,8 @@ export function Inventory({ products, setProducts, settings }: InventoryProps) {
       {isScanningBarcode && (
         <BarcodeScanner 
           onScanSuccess={(code) => {
-            const scannedCode = code.trim();
-            const existingProduct = products.find(p => p.barcode && p.barcode.toLowerCase() === scannedCode.toLowerCase());
+            const scannedCode = normalizeBarcode(code).trim();
+            const existingProduct = products.find(p => p.barcode && isBarcodeMatch(p.barcode, scannedCode));
             
             if (existingProduct) {
               // Show toast
@@ -515,25 +515,27 @@ export function Inventory({ products, setProducts, settings }: InventoryProps) {
       )}
 
       {/* Floating Action Add Product Button - Fully draggable */}
-      <motion.button 
-        type="button"
-        drag
-        dragElastic={0.05}
-        dragMomentum={false}
-        dragTransition={{ bounceStiffness: 600, bounceDamping: 25 }}
-        whileDrag={{ scale: 1.1, cursor: 'grabbing', zIndex: 110 }}
-        onClick={() => {
-          resetForm();
-          setIsAddingProduct(true);
-        }}
-        className="fixed right-6 bottom-24 md:bottom-28 bg-emerald-600 hover:bg-emerald-500 text-white font-bold p-4 rounded-full shadow-2xl active:scale-95 transition-all z-[100] flex items-center justify-center gap-2.5 group border border-emerald-500 hover:shadow-[0_0_24px_rgba(16,185,129,0.6)] animate-pulse hover:animate-none cursor-grab touch-none"
-        title="Add Product - Drag anywhere on screen to move"
-      >
-        <Plus className="w-6 h-6" />
-        <span className="max-w-0 overflow-hidden group-hover:max-w-xs transition-all duration-300 ease-out text-[11px] font-black uppercase tracking-widest whitespace-nowrap">
-          Add Products
-        </span>
-      </motion.button>
+      {!isAddingProduct && (
+        <motion.button 
+          type="button"
+          drag
+          dragElastic={0.05}
+          dragMomentum={false}
+          dragTransition={{ bounceStiffness: 600, bounceDamping: 25 }}
+          whileDrag={{ scale: 1.1, cursor: 'grabbing', zIndex: 110 }}
+          onClick={() => {
+            resetForm();
+            setIsAddingProduct(true);
+          }}
+          className="fixed right-6 bottom-24 md:bottom-28 bg-emerald-600 hover:bg-emerald-500 text-white font-bold p-4 rounded-full shadow-2xl active:scale-95 transition-all z-[100] flex items-center justify-center gap-2.5 group border border-emerald-500 hover:shadow-[0_0_24px_rgba(16,185,129,0.6)] animate-pulse hover:animate-none cursor-grab touch-none"
+          title="Add Product - Drag anywhere on screen to move"
+        >
+          <Plus className="w-6 h-6" />
+          <span className="max-w-0 overflow-hidden group-hover:max-w-xs transition-all duration-300 ease-out text-[11px] font-black uppercase tracking-widest whitespace-nowrap">
+            Add Products
+          </span>
+        </motion.button>
+      )}
     </div>
   );
 }

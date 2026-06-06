@@ -3,30 +3,12 @@ import { Search, Trash2, Minus, Plus, Users, CreditCard, ShoppingCart, CheckCirc
 import { QRCodeSVG } from 'qrcode.react';
 import * as htmlToImage from 'html-to-image';
 import { Product, Customer, Transaction, ShopSettings } from '../types';
-import { formatCurrency, generateId, cn } from '../lib/utils';
+import { formatCurrency, generateId, cn, normalizeBarcode, isBarcodeMatch } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { FirestoreService } from '../lib/firestoreService';
 import { BarcodeScanner, playBeep, playErrorSound } from './BarcodeScanner';
 
 import { translations, Language } from '../lib/translations';
-
-const normalizeBarcode = (code: any): string => {
-  if (!code) return '';
-  return String(code).trim().replace(/[\r\n\s\t]+/g, '').toLowerCase();
-};
-
-const isBarcodeMatch = (b1: string, b2: string): boolean => {
-  const norm1 = normalizeBarcode(b1);
-  const norm2 = normalizeBarcode(b2);
-  if (!norm1 || !norm2) return false;
-  if (norm1 === norm2) return true;
-  
-  // Strip leading zeros for UPC/EAN standard matches
-  const strip1 = norm1.replace(/^0+/, '');
-  const strip2 = norm2.replace(/^0+/, '');
-  if (strip1 && strip2 && strip1 === strip2) return true;
-  return false;
-};
 
 interface POSProps {
   products: Product[];
