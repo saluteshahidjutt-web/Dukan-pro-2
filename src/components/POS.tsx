@@ -395,25 +395,9 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
           />
           <button 
             type="button"
-            onClick={() => {
-              const checkMobile = window.innerWidth <= 768 || /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-              if (checkMobile) {
-                setIsScanningCamera(true);
-              } else {
-                if (shopId) {
-                  FirestoreService.requestMobileScan(shopId);
-                  setShowPCScanRequestToast(true);
-                  // Setup auto close
-                  setTimeout(() => {
-                    setShowPCScanRequestToast(false);
-                  }, 8000);
-                } else {
-                  setIsScanningCamera(true);
-                }
-              }
-            }}
+            onClick={() => setIsScanningCamera(true)}
             className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-emerald-500 transition-colors p-1"
-            title="Scan Barcode (triggers phone scanner on PC)"
+            title="Scan Barcode"
           >
             <QrCode size={18} />
           </button>
@@ -913,152 +897,7 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
         />
       )}
 
-       {/* Phone scanner transmitter handshake setup instructions */}
-      <AnimatePresence>
-        {showPCScanRequestToast && (
-          <motion.div 
-            initial={{ opacity: 0, y: -40, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -40, scale: 0.95 }}
-            className="fixed top-24 left-1/2 -translate-x-1/2 z-[250] w-full max-w-md px-4"
-          >
-            <div className="bg-slate-900 border border-emerald-500/30 rounded-3xl p-4.5 flex items-center justify-between shadow-2xl gap-4">
-              <div className="flex items-center gap-3.5">
-                <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center border border-emerald-500/20 shrink-0">
-                  <Smartphone size={20} className="animate-pulse" />
-                </div>
-                <div>
-                  <h4 className="text-xs font-black uppercase text-emerald-400 tracking-wider">Mobile Scanner Signal Sent!</h4>
-                  <p className="text-[10px] text-slate-300 font-bold mt-0.5 leading-snug">
-                    Apne mobile scanner par notification check karein. QR/Link dekhne ke liye{' '}
-                    <button 
-                      onClick={() => {
-                        setShowPCScanRequestToast(false);
-                        setIsPhoneModalOpen(true);
-                      }}
-                      className="text-emerald-400 underline font-black hover:text-emerald-300"
-                    >
-                      yehan click karein
-                    </button>
-                    .
-                  </p>
-                </div>
-              </div>
-              <button 
-                onClick={() => setShowPCScanRequestToast(false)} 
-                className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition-colors"
-                type="button"
-              >
-                <X size={16} />
-              </button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
-      {/* Phone scanner transmitter handshake setup instructions */}
-      <AnimatePresence>
-        {isPhoneModalOpen && (
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 15 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 15 }}
-              className="bg-white dark:bg-slate-800 w-full max-w-lg rounded-[36px] overflow-hidden shadow-2xl relative border border-slate-100 dark:border-slate-700/60 p-6 space-y-6"
-            >
-              {/* Header */}
-              <div className="flex justify-between items-start">
-                <div className="flex gap-3 items-center">
-                  <div className="w-12 h-12 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-100 dark:border-emerald-900 text-emerald-600 dark:text-emerald-400 rounded-2xl flex items-center justify-center font-bold">
-                    <Smartphone size={24} className="animate-bounce" />
-                  </div>
-                  <div>
-                    <h3 className="text-base font-black text-slate-900 dark:text-white uppercase tracking-tight">Mobile Camera Barcode Gun</h3>
-                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-0.5">Real-time smartphone sync node</p>
-                  </div>
-                </div>
-                <button 
-                  onClick={() => setIsPhoneModalOpen(false)} 
-                  className="p-2.5 bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-600 active:scale-95 transition-all"
-                >
-                  <X size={18} />
-                </button>
-              </div>
-
-              {/* Status information */}
-              <div className="bg-emerald-50/55 dark:bg-emerald-950/20 border border-emerald-100/40 dark:border-emerald-900/30 rounded-2xl p-4 flex items-center justify-between text-xs font-bold text-emerald-700 dark:text-emerald-400">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping inline-block" />
-                  <span>PC ACTIVE & LISTENING</span>
-                </div>
-                <p className="text-[10px] opacity-80">FREE CLOUD STREAM ACTIVE</p>
-              </div>
-
-              {/* Steps grid & QR */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
-                {/* QR Code container */}
-                <div className="bg-slate-50 dark:bg-slate-900/50 p-6 rounded-[28px] border border-slate-100 dark:border-slate-800 flex flex-col items-center justify-center space-y-4">
-                  {shopId ? (
-                    <div className="bg-white p-3.5 rounded-2xl shadow-inner border border-slate-100">
-                      <QRCodeSVG 
-                        value={`${window.location.origin}/?scanMode=phone&shopId=${shopId}`} 
-                        size={160} 
-                        level="M" 
-                      />
-                    </div>
-                  ) : (
-                    <div className="w-40 h-40 bg-slate-200 animate-pulse rounded-2xl" />
-                  )}
-                  <p className="text-[9px] text-slate-500 font-black uppercase text-center tracking-widest">Scan QR with Shop Phone</p>
-                </div>
-
-                {/* Instructions steps */}
-                <div className="space-y-4 text-xs font-medium text-slate-600 dark:text-slate-300">
-                  <div className="flex gap-3">
-                    <div className="w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-700 font-black text-slate-900 dark:text-white flex items-center justify-center shrink-0">1</div>
-                    <p className="leading-relaxed">Apne phone se is **QR code** ko camera ya normal/WhatsApp scan app se scan karein.</p>
-                  </div>
-                  <div className="flex gap-3">
-                    <div className="w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-700 font-black text-slate-900 dark:text-white flex items-center justify-center shrink-0">2</div>
-                    <p className="leading-relaxed">Yeh bina kisi login ke automatic phone camera open kar k scanner bridge connection start karega.</p>
-                  </div>
-                  <div className="flex gap-3">
-                    <div className="w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-700 font-black text-slate-900 dark:text-white flex items-center justify-center shrink-0">3</div>
-                    <p className="leading-relaxed">Ab aap directly mobile se scanning karein; products khud-ba-khud is screen pe add honge!</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Action and manual link copy */}
-              <div className="pt-2 flex flex-col sm:flex-row gap-3">
-                <button
-                  onClick={() => {
-                    const url = `${window.location.origin}/?scanMode=phone&shopId=${shopId}`;
-                    navigator.clipboard.writeText(url);
-                    const toast = document.createElement('div');
-                    toast.className = 'fixed bottom-10 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-[10px] font-black uppercase tracking-widest px-6 py-3.5 rounded-full z-[99999] shadow-2xl';
-                    toast.innerText = 'LINK COPIED TO CLIPBOARD!';
-                    document.body.appendChild(toast);
-                    setTimeout(() => toast.remove(), 2500);
-                  }}
-                  className="flex-1 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-200 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-95"
-                >
-                  Copy connection Link
-                </button>
-                <button
-                  onClick={() => {
-                    const url = `${window.location.origin}/?scanMode=phone&shopId=${shopId}`;
-                    window.open(url, '_blank');
-                  }}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-95"
-                >
-                  Open in desktop tab
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
 
       {/* Floating Action Barcode Scan Button - Fully draggable */}
       <motion.button 
@@ -1068,22 +907,7 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
         dragMomentum={false}
         dragTransition={{ bounceStiffness: 600, bounceDamping: 25 }}
         whileDrag={{ scale: 1.1, cursor: 'grabbing', zIndex: 110 }}
-        onClick={() => {
-          const checkMobile = window.innerWidth <= 768 || /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-          if (checkMobile) {
-            setIsScanningCamera(true);
-          } else {
-            if (shopId) {
-              FirestoreService.requestMobileScan(shopId);
-              setShowPCScanRequestToast(true);
-              setTimeout(() => {
-                setShowPCScanRequestToast(false);
-              }, 8000);
-            } else {
-              setIsScanningCamera(true);
-            }
-          }
-        }}
+        onClick={() => setIsScanningCamera(true)}
         className="fixed right-6 bottom-24 md:bottom-28 bg-emerald-600 hover:bg-emerald-500 text-white font-bold p-4 rounded-full shadow-2xl active:scale-95 transition-all z-[100] flex items-center justify-center gap-2.5 group border border-emerald-500 hover:shadow-[0_0_24px_rgba(16,185,129,0.6)] animate-pulse hover:animate-none cursor-grab touch-none"
         title="Scan Barcode - Drag anywhere on screen to move"
       >

@@ -513,6 +513,27 @@ export function Inventory({ products, setProducts, settings }: InventoryProps) {
           onClose={() => setIsScanningBarcode(false)}
         />
       )}
+
+      {/* Floating Action Add Product Button - Fully draggable */}
+      <motion.button 
+        type="button"
+        drag
+        dragElastic={0.05}
+        dragMomentum={false}
+        dragTransition={{ bounceStiffness: 600, bounceDamping: 25 }}
+        whileDrag={{ scale: 1.1, cursor: 'grabbing', zIndex: 110 }}
+        onClick={() => {
+          resetForm();
+          setIsAddingProduct(true);
+        }}
+        className="fixed right-6 bottom-24 md:bottom-28 bg-emerald-600 hover:bg-emerald-500 text-white font-bold p-4 rounded-full shadow-2xl active:scale-95 transition-all z-[100] flex items-center justify-center gap-2.5 group border border-emerald-500 hover:shadow-[0_0_24px_rgba(16,185,129,0.6)] animate-pulse hover:animate-none cursor-grab touch-none"
+        title="Add Product - Drag anywhere on screen to move"
+      >
+        <Plus className="w-6 h-6" />
+        <span className="max-w-0 overflow-hidden group-hover:max-w-xs transition-all duration-300 ease-out text-[11px] font-black uppercase tracking-widest whitespace-nowrap">
+          Add Products
+        </span>
+      </motion.button>
     </div>
   );
 }
