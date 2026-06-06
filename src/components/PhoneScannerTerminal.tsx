@@ -36,8 +36,9 @@ export function PhoneScannerTerminal({ shopId }: PhoneScannerTerminalProps) {
         const isRequested = !!data.pc_request_scan;
         setPcRequestScan(isRequested);
 
-        // Alert on new scanning request
+        // Alert on new scanning request and automatically open camera
         if (isRequested && !prevRequestRef.current) {
+          setIsCameraActive(true);
           if (!isMuted) {
             try {
               playBeep();

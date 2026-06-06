@@ -74,6 +74,7 @@ export function BarcodeScanner({ onScanSuccess, onClose }: BarcodeScannerProps) 
   useEffect(() => {
     let isMounted = true;
     let qrScanner: Html5Qrcode | null = null;
+    let isStreaming = false;
 
     const startScanner = async () => {
       try {
@@ -86,11 +87,8 @@ export function BarcodeScanner({ onScanSuccess, onClose }: BarcodeScannerProps) 
         qrCodeRef.current = html5QrCode;
 
         const config: any = {
-          fps: 30, // Max frame rate for speed
-          aspectRatio: 1.333333,
-          experimentalFeatures: {
-            useBarCodeDetectorIfSupported: true // Native high-performance platform decoder
-          }
+          fps: 24, // Optimized standard frame rate
+          aspectRatio: 1.333333
         };
 
         await html5QrCode.start(
@@ -106,6 +104,8 @@ export function BarcodeScanner({ onScanSuccess, onClose }: BarcodeScannerProps) 
             // normal searching frame ignores
           }
         );
+
+        isStreaming = true;
 
         if (isMounted) {
           setCameraActive(true);
@@ -132,11 +132,15 @@ export function BarcodeScanner({ onScanSuccess, onClose }: BarcodeScannerProps) 
 
     return () => {
       isMounted = false;
-      if (qrScanner) {
-        if (qrScanner.isScanning) {
-          qrScanner.stop().catch(err => {
+      if (qrScanner && isStreaming) {
+        try {
+          qrScanner.stop().then(() => {
+            console.log("Scanner stopped successfully");
+          }).catch(err => {
             console.warn("Dynamic scanner shutdown handled gracefully", err);
           });
+        } catch (err) {
+          console.warn("Failed to stop scanner synchronously", err);
         }
       }
     };
