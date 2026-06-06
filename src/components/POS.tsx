@@ -60,16 +60,8 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
   const [isScanningCamera, setIsScanningCamera] = useState(false);
   const [remoteScannerActive, setRemoteScannerActive] = useState(false);
   const [isPhoneModalOpen, setIsPhoneModalOpen] = useState(false);
+  const [showPCScanRequestToast, setShowPCScanRequestToast] = useState(false);
   const [shopId, setShopId] = useState('');
-  const [duplicateProduct, setDuplicateProduct] = useState<CartItem | null>(null);
-  const [duplicateTempQty, setDuplicateTempQty] = useState(1);
-
-  // Auto-sync duplicate proposing count
-  useEffect(() => {
-    if (duplicateProduct) {
-      setDuplicateTempQty(duplicateProduct.quantity + 1);
-    }
-  }, [duplicateProduct]);
 
   // Optional: Listen for mobile Phone Barcode Scans via Firestore real-time listener
   React.useEffect(() => {
@@ -143,7 +135,7 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
   const addToCart = (product: Product) => {
     const existing = cart.find(item => item.id === product.id);
     if (existing) {
-      setDuplicateProduct(existing);
+      setCart(prev => prev.map(item => item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item));
       return;
     }
     setCart(prev => [...prev, { ...product, quantity: 1 }]);
@@ -403,35 +395,30 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
           />
           <button 
             type="button"
-            onClick={() => setIsScanningCamera(true)}
+            onClick={() => {
+              const checkMobile = window.innerWidth <= 768 || /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+              if (checkMobile) {
+                setIsScanningCamera(true);
+              } else {
+                if (shopId) {
+                  FirestoreService.requestMobileScan(shopId);
+                  setShowPCScanRequestToast(true);
+                  // Setup auto close
+                  setTimeout(() => {
+                    setShowPCScanRequestToast(false);
+                  }, 8000);
+                } else {
+                  setIsScanningCamera(true);
+                }
+              }
+            }}
             className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-emerald-500 transition-colors p-1"
-            title="Scan Barcode"
+            title="Scan Barcode (triggers phone scanner on PC)"
           >
             <QrCode size={18} />
           </button>
         </div>
         <div className="flex items-center gap-2">
-          {/* Mobile phone scanner connection button */}
-          <button 
-            type="button"
-            onClick={() => {
-              const checkMobile = window.innerWidth <= 768 || /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-              if (checkMobile) {
-                if (shopId) {
-                  window.location.href = `/?scanMode=phone&shopId=${shopId}`;
-                }
-              } else {
-                setIsPhoneModalOpen(true);
-              }
-            }}
-            className="px-4 py-3 rounded-xl border bg-slate-900 border-slate-800 hover:bg-slate-800 text-emerald-400 dark:bg-slate-800 dark:border-slate-700 dark:hover:bg-slate-700 flex items-center gap-2 text-xs font-black uppercase transition-all tracking-widest shadow-md active:scale-[0.98]"
-            title="Connect Smartphone Camera as Barcode Gun"
-          >
-            <Smartphone size={16} className="animate-pulse" />
-            <span className="hidden lg:inline">MOBILE SCANNER</span>
-            <span className="lg:hidden">PHONE SCANNER</span>
-          </button>
-
           <button 
             onClick={() => setIsCustomerModalOpen(true)}
             className={cn("px-4 py-3 rounded-xl border flex items-center gap-2 text-xs font-black uppercase transition-all tracking-widest", selectedCustomer ? "bg-indigo-600 text-white border-indigo-600 shadow-lg shadow-indigo-100" : "bg-white text-slate-600 border-slate-200 shadow-sm")}
@@ -926,6 +913,49 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
         />
       )}
 
+       {/* Phone scanner transmitter handshake setup instructions */}
+      <AnimatePresence>
+        {showPCScanRequestToast && (
+          <motion.div 
+            initial={{ opacity: 0, y: -40, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -40, scale: 0.95 }}
+            className="fixed top-24 left-1/2 -translate-x-1/2 z-[250] w-full max-w-md px-4"
+          >
+            <div className="bg-slate-900 border border-emerald-500/30 rounded-3xl p-4.5 flex items-center justify-between shadow-2xl gap-4">
+              <div className="flex items-center gap-3.5">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center border border-emerald-500/20 shrink-0">
+                  <Smartphone size={20} className="animate-pulse" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-black uppercase text-emerald-400 tracking-wider">Mobile Scanner Signal Sent!</h4>
+                  <p className="text-[10px] text-slate-300 font-bold mt-0.5 leading-snug">
+                    Apne mobile scanner par notification check karein. QR/Link dekhne ke liye{' '}
+                    <button 
+                      onClick={() => {
+                        setShowPCScanRequestToast(false);
+                        setIsPhoneModalOpen(true);
+                      }}
+                      className="text-emerald-400 underline font-black hover:text-emerald-300"
+                    >
+                      yehan click karein
+                    </button>
+                    .
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowPCScanRequestToast(false)} 
+                className="p-1.5 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition-colors"
+                type="button"
+              >
+                <X size={16} />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Phone scanner transmitter handshake setup instructions */}
       <AnimatePresence>
         {isPhoneModalOpen && (
@@ -1030,117 +1060,6 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
         )}
       </AnimatePresence>
 
-      <AnimatePresence>
-        {duplicateProduct && (
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[220] flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 15 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 15 }}
-              className="bg-white dark:bg-slate-800 w-full max-w-md rounded-[36px] overflow-hidden shadow-2xl relative border border-slate-100 dark:border-slate-700/60 p-6 space-y-6 text-slate-900 dark:text-white"
-            >
-              {/* Header */}
-              <div className="flex justify-between items-start">
-                <div className="flex gap-3 items-center">
-                  <div className="w-12 h-12 bg-amber-50 dark:bg-amber-950/40 border border-amber-100 dark:border-amber-900 text-amber-600 dark:text-amber-400 rounded-2xl flex items-center justify-center font-bold">
-                    <ShoppingCart size={22} className="text-amber-500 animate-pulse" />
-                  </div>
-                  <div>
-                    <h3 className="text-base font-black uppercase tracking-tight">Already in Cart!</h3>
-                    <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-0.5">Product pehle se cart mein majood hai</p>
-                  </div>
-                </div>
-                <button 
-                  onClick={() => setDuplicateProduct(null)} 
-                  className="p-2.5 bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300 rounded-xl hover:bg-slate-200 dark:hover:bg-slate-600 active:scale-95 transition-all"
-                >
-                  <X size={18} />
-                </button>
-              </div>
-
-              {/* Product Info Display Card */}
-              <div className="bg-slate-50 dark:bg-slate-900/40 border border-slate-100 dark:border-slate-800 p-4 rounded-3xl space-y-3.5">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h4 className="font-extrabold text-sm uppercase leading-snug">{duplicateProduct.name}</h4>
-                    <p className="text-[10px] text-slate-500 font-mono tracking-wider mt-1">SKU/Code: {duplicateProduct.barcode || 'N/A'}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-xs text-slate-400 font-black tracking-widest uppercase">Unit Price</p>
-                    <p className="text-sm font-black mt-0.5">{formatCurrency(duplicateProduct.price)}</p>
-                  </div>
-                </div>
-
-                {/* Sub Total proposed display */}
-                <div className="pt-3.5 border-t border-dashed border-slate-200 dark:border-slate-700/80 flex justify-between items-center">
-                  <span className="text-[10.5px] font-black uppercase text-slate-400 tracking-wider">Estimated Total</span>
-                  <span className="text-base font-black text-emerald-600 dark:text-emerald-400 font-mono animate-pulse">
-                    {formatCurrency(duplicateProduct.price * duplicateTempQty)}
-                  </span>
-                </div>
-              </div>
-
-              {/* Counter controller */}
-              <div className="flex flex-col items-center justify-center space-y-3 p-2 bg-slate-50/50 dark:bg-slate-900/10 rounded-3xl border border-slate-100/50 dark:border-slate-700/30">
-                <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Adjust Quantity</p>
-                <div className="flex items-center gap-6">
-                  <button 
-                    onClick={() => setDuplicateTempQty(Math.max(1, duplicateTempQty - 1))}
-                    className="w-12 h-12 rounded-full border border-slate-200 dark:border-slate-700 hover:bg-slate-105 dark:hover:bg-slate-705 flex items-center justify-center text-slate-800 dark:text-slate-200 font-black text-xl transition-all active:scale-90"
-                  >
-                    <Minus size={18} />
-                  </button>
-                  <span className="text-2xl font-black font-mono w-14 text-center">
-                    {duplicateTempQty}
-                  </span>
-                  <button 
-                    onClick={() => setDuplicateTempQty(duplicateTempQty + 1)}
-                    className="w-12 h-12 rounded-full border border-slate-200 dark:border-slate-700 hover:bg-slate-105 dark:hover:bg-slate-705 flex items-center justify-center text-slate-800 dark:text-slate-200 font-black text-xl transition-all active:scale-90"
-                  >
-                    <Plus size={18} />
-                  </button>
-                </div>
-                <p className="text-[10px] text-slate-500 font-bold">
-                  Original Quantity: <span className="font-mono">{duplicateProduct.quantity}</span> (Next proposed: <span className="font-mono">{duplicateProduct.quantity + 1}</span>)
-                </p>
-              </div>
-
-              {/* Final Actions */}
-              <div className="space-y-2.5">
-                <button 
-                  onClick={() => {
-                    // Update state inside cart!
-                    setCart(prev => prev.map(item => item.id === duplicateProduct.id ? { ...item, quantity: duplicateTempQty } : item));
-                    setDuplicateProduct(null);
-                  }}
-                  className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest transition-all active:scale-95 shadow-xl shadow-emerald-950/10"
-                >
-                  Haan, Quantity update karo
-                </button>
-                <div className="grid grid-cols-2 gap-3">
-                  <button 
-                    onClick={() => {
-                      // Remove item completely
-                      removeFromCart(duplicateProduct.id);
-                      setDuplicateProduct(null);
-                    }}
-                    className="bg-rose-50 dark:bg-rose-950/20 text-rose-600 dark:text-rose-400 border border-rose-100 dark:border-rose-900/30 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-95"
-                  >
-                    Remove from Cart
-                  </button>
-                  <button 
-                    onClick={() => setDuplicateProduct(null)}
-                    className="bg-slate-100 dark:bg-slate-700 text-slate-850 dark:text-slate-200 py-3 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-95"
-                  >
-                    Keep Original
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
       {/* Floating Action Barcode Scan Button - Fully draggable */}
       <motion.button 
         type="button"
@@ -1149,7 +1068,22 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
         dragMomentum={false}
         dragTransition={{ bounceStiffness: 600, bounceDamping: 25 }}
         whileDrag={{ scale: 1.1, cursor: 'grabbing', zIndex: 110 }}
-        onClick={() => setIsScanningCamera(true)}
+        onClick={() => {
+          const checkMobile = window.innerWidth <= 768 || /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+          if (checkMobile) {
+            setIsScanningCamera(true);
+          } else {
+            if (shopId) {
+              FirestoreService.requestMobileScan(shopId);
+              setShowPCScanRequestToast(true);
+              setTimeout(() => {
+                setShowPCScanRequestToast(false);
+              }, 8000);
+            } else {
+              setIsScanningCamera(true);
+            }
+          }
+        }}
         className="fixed right-6 bottom-24 md:bottom-28 bg-emerald-600 hover:bg-emerald-500 text-white font-bold p-4 rounded-full shadow-2xl active:scale-95 transition-all z-[100] flex items-center justify-center gap-2.5 group border border-emerald-500 hover:shadow-[0_0_24px_rgba(16,185,129,0.6)] animate-pulse hover:animate-none cursor-grab touch-none"
         title="Scan Barcode - Drag anywhere on screen to move"
       >

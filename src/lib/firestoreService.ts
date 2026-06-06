@@ -544,6 +544,30 @@ export const FirestoreService = {
     }
   },
 
+  requestMobileScan: async (shopId: string) => {
+    try {
+      const sessionRef = doc(db, 'scanner_sessions', shopId);
+      await setDoc(sessionRef, { 
+        pc_request_scan: true,
+        pc_request_scan_time: Date.now()
+      }, { merge: true });
+    } catch (e) {
+      console.error('Failed to request mobile scan', e);
+    }
+  },
+
+  resetMobileScanRequest: async (shopId: string) => {
+    try {
+      const sessionRef = doc(db, 'scanner_sessions', shopId);
+      await setDoc(sessionRef, { 
+        pc_request_scan: false,
+        pc_request_scan_time: null
+      }, { merge: true });
+    } catch (e) {
+      console.error('Failed to reset mobile scan request', e);
+    }
+  },
+
   // --- Expenses ---
   getExpenses: async () => {
     const userId = auth.currentUser?.uid;

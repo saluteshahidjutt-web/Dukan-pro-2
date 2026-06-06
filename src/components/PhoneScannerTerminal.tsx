@@ -18,8 +18,10 @@ export function PhoneScannerTerminal({ shopId }: PhoneScannerTerminalProps) {
   const [wakeLockActive, setWakeLockActive] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [shopName, setShopName] = useState<string>('Dukaan Partner');
-  const [isCameraActive, setIsCameraActive] = useState(true);
+  const [isCameraActive, setIsCameraActive] = useState(false);
+  const [pcRequestScan, setPcRequestScan] = useState<boolean>(false);
   const wakeLockRef = useRef<any>(null);
+  const prevRequestRef = useRef<boolean>(false);
 
   // Sync real-time status of the shop PC and document
   useEffect(() => {
@@ -30,23 +32,45 @@ export function PhoneScannerTerminal({ shopId }: PhoneScannerTerminalProps) {
         if (data.pc_status) {
           setPcStatus(data.pc_status);
         }
+
+        const isRequested = !!data.pc_request_scan;
+        setPcRequestScan(isRequested);
+
+        // Alert on new scanning request
+        if (isRequested && !prevRequestRef.current) {
+          if (!isMuted) {
+            try {
+              playBeep();
+            } catch (err) {
+              console.warn("Could not play scan request alert", err);
+            }
+          }
+          if ('vibrate' in navigator) {
+            navigator.vibrate([200, 100, 200]);
+          }
+        }
+        prevRequestRef.current = isRequested;
       }
+    }, (err) => {
+      console.warn("Sessions fetch failed", err);
     });
 
-    // Also fetch shop details to personalize the UI
+    // Also fetch shop details to personalize the UI (with error fallback)
     const settingsDoc = doc(db, 'settings', shopId);
     const fetchSettings = onSnapshot(settingsDoc, (sn) => {
       if (sn.exists()) {
         const data = sn.data();
         if (data.name) setShopName(data.name);
       }
+    }, (err) => {
+      console.warn("Settings fetch failed (likely unauthenticated mobile):", err);
     });
 
     return () => {
       unsub();
       fetchSettings();
     };
-  }, [shopId]);
+  }, [shopId, isMuted]);
 
   // Request & Maintain Screen Wake Lock to keep phone screen ALWAYS on
   useEffect(() => {
@@ -102,14 +126,16 @@ export function PhoneScannerTerminal({ shopId }: PhoneScannerTerminalProps) {
 
       // Fire to Firestore immediately
       await FirestoreService.updateMobileBarcode(shopId, code);
+      await FirestoreService.resetMobileScanRequest(shopId);
 
       setLastScanned(code);
       setScanCount(prev => prev + 1);
 
-      // Brief ripple animation freeze to avoid double-scans of exact same frame
+      // Return camera to standby state to preserve battery
       setTimeout(() => {
+        setIsCameraActive(false);
         setIsSubmitting(false);
-      }, 1200);
+      }, 1500);
 
     } catch (e) {
       console.error(e);
@@ -251,6 +277,55 @@ export function PhoneScannerTerminal({ shopId }: PhoneScannerTerminalProps) {
           </button>
         </div>
       </footer>
+
+      {/* Real-time PC Scan Request Alert Overlay */}
+      <AnimatePresence>
+        {pcRequestScan && !isCameraActive && (
+          <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-md z-[100] flex items-center justify-center p-6">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 30 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 30 }}
+              className="bg-slate-900 border border-emerald-500/30 rounded-[40px] p-8 text-center space-y-7 max-w-sm w-full shadow-2xl relative"
+            >
+              {/* Pulsing Scan Indicator */}
+              <div className="relative mx-auto w-20 h-20 bg-emerald-500/10 border border-emerald-400/20 rounded-full flex items-center justify-center text-emerald-400">
+                <span className="absolute inset-0 rounded-full bg-emerald-500/20 animate-ping" />
+                <Smartphone size={36} className="relative text-emerald-400 animate-pulse" />
+              </div>
+              
+              <div className="space-y-2">
+                <span className="px-3.5 py-1.5 bg-emerald-500/10 text-emerald-400 text-[10px] font-black uppercase tracking-widest rounded-full border border-emerald-500/20">
+                  PC Requesting Scan
+                </span>
+                <h3 className="text-xl font-black uppercase tracking-tight text-white mt-1 pt-2">Scan Now on Mobile!</h3>
+                <p className="text-xs text-slate-400 font-bold leading-relaxed">
+                  PC scanner click kiya gaya hai. Is par click karke camera open karein aur product barcode scan karein.
+                </p>
+              </div>
+
+              <div className="space-y-3 pt-1">
+                <button 
+                  onClick={() => {
+                    setIsCameraActive(true);
+                  }}
+                  className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black py-4.5 rounded-2xl flex items-center justify-center gap-2 shadow-xl shadow-emerald-500/10 active:scale-95 transition-all uppercase tracking-widest text-xs"
+                >
+                  <Zap size={16} /> Haan, Camera Kholo
+                </button>
+                <button 
+                  onClick={async () => {
+                    await FirestoreService.resetMobileScanRequest(shopId);
+                  }}
+                  className="w-full bg-slate-800 hover:bg-slate-700 text-slate-400 font-black py-3 rounded-2xl active:scale-95 transition-all uppercase tracking-widest text-[10px]"
+                >
+                  Ignore/Cancel
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -119,5 +119,9 @@ service cloud.firestore {
       allow get: if isSignedIn() && userId == request.auth.uid;
       allow write: if isSignedIn() && userId == request.auth.uid && isValidSettings(incoming());
     }
+
+    match /scanner_sessions/{shopId} {
+      allow get, write, update: if true;
+    }
   }
 }

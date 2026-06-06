@@ -76,9 +76,19 @@ export function Inventory({ products, setProducts, settings }: InventoryProps) {
     e.preventDefault();
     if (!newProduct.name || newProduct.price === undefined) return;
 
+    const finalBarcode = (newProduct.barcode || '').trim();
+    
+    // Check for duplicate barcode
+    if (finalBarcode) {
+      const duplicateFound = products.find(p => p.barcode === finalBarcode && p.id !== editProduct?.id);
+      if (duplicateFound) {
+        alert("Alert: Ye barcode ek aur product '" + duplicateFound.name + "' ko assign hai. Please alag barcode use karein.");
+        return;
+      }
+    }
+
     setIsProcessing(true);
     try {
-      const finalBarcode = (newProduct.barcode || '').trim();
       if (editProduct) {
         await FirestoreService.saveProduct({ 
           ...editProduct, 
