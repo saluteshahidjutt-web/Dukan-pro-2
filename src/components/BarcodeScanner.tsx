@@ -69,6 +69,7 @@ export function BarcodeScanner({ onScanSuccess, onClose }: BarcodeScannerProps) 
   const [torchSupported, setTorchSupported] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
   const [cameraActive, setCameraActive] = useState(false);
+  const [initError, setInitError] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -108,6 +109,7 @@ export function BarcodeScanner({ onScanSuccess, onClose }: BarcodeScannerProps) 
 
         if (isMounted) {
           setCameraActive(true);
+          setInitError(null);
           // Check if torch/flashlight feature is present in running camera
           try {
             const capabilities = (html5QrCode as any).getRunningTrackCapabilities();
@@ -118,8 +120,11 @@ export function BarcodeScanner({ onScanSuccess, onClose }: BarcodeScannerProps) 
             console.warn("Could not inspect torch capability", err);
           }
         }
-      } catch (err) {
+      } catch (err: any) {
         console.warn("Scanner initiation error:", err);
+        if (isMounted) {
+          setInitError(err?.message || 'Failed to access Camera. Please grant permissions and ensure you are using Google Chrome or Safari browser.');
+        }
       }
     };
 
@@ -194,25 +199,40 @@ export function BarcodeScanner({ onScanSuccess, onClose }: BarcodeScannerProps) 
 
       {/* Viewport Camera & overlay */}
       <div className="relative flex-1 flex items-center justify-center my-4 overflow-hidden rounded-[32px] border border-slate-800 bg-black shadow-2xl shadow-black/80">
-        <div id={scannerId} className="w-full h-full [&_video]:!w-full [&_video]:!h-full [&_video]:!object-cover flex items-center justify-center overflow-hidden" />
-        
-        {/* Floating Futuristic viewfinder grids */}
-        <div className="absolute pointer-events-none inset-0 flex items-center justify-center">
-          <div className="border border-emerald-500/30 w-[84%] h-[46%] rounded-2xl shadow-[0_0_40px_rgba(16,185,129,0.06)] flex items-center justify-center relative">
-            
-            {/* Double thick neon corner brackets */}
-            <div className="absolute top-0 left-0 w-6 h-6 border-t-4 border-l-4 border-emerald-400 rounded-tl-xl -mt-[3px] -ml-[3px]" />
-            <div className="absolute top-0 right-0 w-6 h-6 border-t-4 border-r-4 border-emerald-400 rounded-tr-xl -mt-[3px] -mr-[3px]" />
-            <div className="absolute bottom-0 left-0 w-6 h-6 border-b-4 border-l-4 border-emerald-400 rounded-bl-xl -mb-[3px] -ml-[3px]" />
-            <div className="absolute bottom-0 right-0 w-6 h-6 border-b-4 border-r-4 border-emerald-400 rounded-br-xl -mb-[3px] -mr-[3px]" />
-            
-            {/* Glowing Scan laser line */}
-            <div className="absolute left-[5%] right-[5%] h-[3px] bg-emerald-400 rounded-full shadow-[0_0_12px_rgba(52,211,153,0.8)] laser-line" />
-            
-            <div className="text-[9px] font-black tracking-widest text-emerald-400/50 absolute top-2 uppercase">ALIGN PRODUCT BARCODE</div>
+        {initError ? (
+          <div className="absolute inset-0 p-6 flex flex-col items-center justify-center text-center space-y-4 bg-slate-900 z-50">
+            <div className="w-16 h-16 bg-rose-500/10 text-rose-500 rounded-2xl flex items-center justify-center mb-2">
+              <Camera size={24} />
+            </div>
+            <h4 className="text-sm font-black text-white uppercase tracking-widest">Camera Access Denied</h4>
+            <p className="text-xs text-slate-400 font-bold leading-relaxed">{initError}</p>
+            <div className="mt-4 p-4 bg-slate-800/50 border border-slate-700 rounded-xl text-[10px] text-slate-300 font-medium">
+              <span className="text-amber-400 font-black">TIP:</span> If you opened this from a QR code scanner (like WhatsApp or Xiaomi Scanner), <strong>tap the 3-dots menu top right</strong> and choose <strong>"Open in Browser"</strong> or <strong>"Open in Chrome/Safari"</strong>.
+            </div>
           </div>
-        </div>
-
+        ) : (
+          <>
+            <div id={scannerId} className="w-full h-full [&_video]:!w-full [&_video]:!h-full [&_video]:!object-cover flex items-center justify-center overflow-hidden" />
+            
+            {/* Floating Futuristic viewfinder grids */}
+            <div className="absolute pointer-events-none inset-0 flex items-center justify-center">
+              <div className="border border-emerald-500/30 w-[84%] h-[46%] rounded-2xl shadow-[0_0_40px_rgba(16,185,129,0.06)] flex items-center justify-center relative">
+                
+                {/* Double thick neon corner brackets */}
+                <div className="absolute top-0 left-0 w-6 h-6 border-t-4 border-l-4 border-emerald-400 rounded-tl-xl -mt-[3px] -ml-[3px]" />
+                <div className="absolute top-0 right-0 w-6 h-6 border-t-4 border-r-4 border-emerald-400 rounded-tr-xl -mt-[3px] -mr-[3px]" />
+                <div className="absolute bottom-0 left-0 w-6 h-6 border-b-4 border-l-4 border-emerald-400 rounded-bl-xl -mb-[3px] -ml-[3px]" />
+                <div className="absolute bottom-0 right-0 w-6 h-6 border-b-4 border-r-4 border-emerald-400 rounded-br-xl -mb-[3px] -mr-[3px]" />
+                
+                {/* Glowing Scan laser line */}
+                <div className="absolute left-[5%] right-[5%] h-[3px] bg-emerald-400 rounded-full shadow-[0_0_12px_rgba(52,211,153,0.8)] laser-line" />
+                
+                <div className="text-[9px] font-black tracking-widest text-emerald-400/50 absolute top-2 uppercase">ALIGN PRODUCT BARCODE</div>
+              </div>
+            </div>
+          </>
+        )}
+        
         {/* Backdrop vignette mask */}
         <div className="absolute inset-0 bg-gradient-to-t from-slate-950/40 via-transparent to-slate-950/40 pointer-events-none" />
       </div>

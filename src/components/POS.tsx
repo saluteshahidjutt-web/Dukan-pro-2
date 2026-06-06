@@ -414,13 +414,22 @@ export function POS({ products, setProducts, customers, setCustomers, setTransac
           {/* Mobile phone scanner connection button */}
           <button 
             type="button"
-            onClick={() => setIsPhoneModalOpen(true)}
+            onClick={() => {
+              const checkMobile = window.innerWidth <= 768 || /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+              if (checkMobile) {
+                if (shopId) {
+                  window.location.href = `/?scanMode=phone&shopId=${shopId}`;
+                }
+              } else {
+                setIsPhoneModalOpen(true);
+              }
+            }}
             className="px-4 py-3 rounded-xl border bg-slate-900 border-slate-800 hover:bg-slate-800 text-emerald-400 dark:bg-slate-800 dark:border-slate-700 dark:hover:bg-slate-700 flex items-center gap-2 text-xs font-black uppercase transition-all tracking-widest shadow-md active:scale-[0.98]"
             title="Connect Smartphone Camera as Barcode Gun"
           >
             <Smartphone size={16} className="animate-pulse" />
             <span className="hidden lg:inline">MOBILE SCANNER</span>
-            <span className="lg:hidden">PHONE</span>
+            <span className="lg:hidden">PHONE SCANNER</span>
           </button>
 
           <button 
