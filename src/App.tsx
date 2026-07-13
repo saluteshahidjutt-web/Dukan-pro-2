@@ -571,7 +571,7 @@ function MainApp() {
                 
                 <div className="pt-8 mt-8 border-t border-emerald-800 space-y-2">
                   <button
-                    onClick={() => window.open('https://wa.me/923211088723?text=Assalam-o-Alaikum!%20I%20need%20help%20with%20Dukaan%20Pro', '_blank')}
+                    onClick={() => window.open('https://wa.me/923001088723?text=Assalam-o-Alaikum!%20I%20need%20help%20with%20Dukaan%20Pro', '_blank')}
                     className="w-full flex items-center gap-3 p-4 rounded-2xl transition-all hover:bg-emerald-800 group"
                   >
                     <div className="bg-emerald-600 text-white p-2 rounded-xl group-hover:scale-110 transition-transform">
