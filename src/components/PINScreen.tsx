@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Lock, Delete, ArrowLeft, ShieldCheck, HelpCircle, ScanFace, Fingerprint, CheckCircle2, AlertCircle, RefreshCcw } from 'lucide-react';
+import { Lock, Delete, ArrowLeft, ShieldCheck, HelpCircle, ScanFace, Fingerprint, CheckCircle2, AlertCircle } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { ShopSettings } from '../types';
 import { hashValue } from '../lib/security';
@@ -35,6 +35,8 @@ export function PINScreen({ settings, onSuccess, mode, onBack, onSetupComplete }
   const [biometricStatus, setBiometricStatus] = useState<'idle' | 'scanning' | 'success' | 'failed'>('idle');
   const [biometricError, setBiometricError] = useState<string>('');
 
+  const hasAutoScannedRef = useRef(false);
+
   const t = translations[settings.language as Language || 'en'];
 
   const handleBiometricScan = useCallback(async () => {
@@ -50,28 +52,29 @@ export function PINScreen({ settings, onSuccess, mode, onBack, onSetupComplete }
         setTimeout(() => {
           setIsScanningBiometric(false);
           onSuccess();
-        }, 400);
+        }, 500);
       } else {
         setBiometricStatus('failed');
         setBiometricError(res.error || 'Face ID / Fingerprint did not match. Please enter PIN code.');
         if ('vibrate' in navigator) navigator.vibrate([150, 80, 150]);
         setTimeout(() => {
           setIsScanningBiometric(false);
-        }, 1200);
+        }, 800);
       }
     } catch (err) {
       console.error("Biometric scan error:", err);
       setBiometricStatus('failed');
-      setBiometricError('Face ID / Fingerprint verification failed. Enter PIN code.');
+      setBiometricError('Face ID / Fingerprint cancelled or failed. Please enter PIN code.');
       setTimeout(() => {
         setIsScanningBiometric(false);
-      }, 1000);
+      }, 800);
     }
   }, [settings.biometricCredentialId, onSuccess]);
 
-  // Auto trigger Face ID / Fingerprint when app opens if biometric is enabled
+  // Auto trigger Face ID / Fingerprint ONCE when app opens if biometric is enabled
   useEffect(() => {
-    if (mode === 'unlock' && settings.biometricEnabled) {
+    if (mode === 'unlock' && settings.biometricEnabled && !hasAutoScannedRef.current) {
+      hasAutoScannedRef.current = true;
       handleBiometricScan();
     }
   }, [mode, settings.biometricEnabled, handleBiometricScan]);
@@ -313,7 +316,7 @@ export function PINScreen({ settings, onSuccess, mode, onBack, onSetupComplete }
               </div>
 
               <h3 className="text-xl font-black text-white tracking-tight mt-2">
-                {biometricStatus === 'success' ? 'Face ID Verified!' :
+                {biometricStatus === 'success' ? 'Face ID / Fingerprint Verified!' :
                  biometricStatus === 'failed' ? 'Biometric Mismatch' :
                  'Face ID / Fingerprint'}
               </h3>
@@ -321,7 +324,7 @@ export function PINScreen({ settings, onSuccess, mode, onBack, onSetupComplete }
               <p className="text-xs text-slate-300 font-medium mt-1.5 mb-6">
                 {biometricStatus === 'scanning' ? 'Verifying Face ID or Fingerprint...' :
                  biometricStatus === 'success' ? 'Unlocking your Dukaan Pro...' :
-                 biometricError || 'Face ID did not match. Prompting PIN code...'}
+                 biometricError || 'Face ID did not match. Enter PIN code below.'}
               </p>
 
               <button
@@ -329,7 +332,7 @@ export function PINScreen({ settings, onSuccess, mode, onBack, onSetupComplete }
                 onClick={() => setIsScanningBiometric(false)}
                 className="w-full py-3 bg-white/10 hover:bg-white/20 active:scale-95 text-white font-bold text-xs uppercase tracking-widest rounded-2xl border border-white/10 transition-all"
               >
-                Enter PIN Code
+                Use PIN Code
               </button>
             </motion.div>
           </motion.div>
@@ -349,22 +352,36 @@ export function PINScreen({ settings, onSuccess, mode, onBack, onSetupComplete }
         }}
         className="w-full max-w-sm flex flex-col items-center gap-6"
       >
-        <div className="w-32 h-32 bg-emerald-50 dark:bg-emerald-950/40 rounded-[36px] flex items-center justify-center text-emerald-600 dark:text-emerald-400 shadow-inner border-2 border-emerald-100 dark:border-emerald-900/40 overflow-hidden relative group">
+        <button
+          type="button"
+          onClick={() => {
+            if (mode === 'unlock' && settings.biometricEnabled) {
+              handleBiometricScan();
+            }
+          }}
+          className="w-32 h-32 bg-emerald-50 dark:bg-emerald-950/40 rounded-[36px] flex items-center justify-center text-emerald-600 dark:text-emerald-400 shadow-inner border-2 border-emerald-100 dark:border-emerald-900/40 overflow-hidden relative group active:scale-95 transition-transform cursor-pointer"
+          title="Tap to scan Face ID or Fingerprint"
+        >
           {settings.logoUrl ? (
             <img src={settings.logoUrl} alt="Logo" className="w-full h-full object-cover" />
           ) : (
             mode === 'setup' ? <ShieldCheck size={64} /> : (
-              settings.biometricEnabled ? <ScanFace size={64} /> : <Lock size={64} />
+              settings.biometricEnabled ? (
+                <div className="relative flex items-center justify-center">
+                  <ScanFace size={60} className="text-emerald-600 dark:text-emerald-400 animate-pulse" />
+                  <Fingerprint size={28} className="absolute text-emerald-500 opacity-90" />
+                </div>
+              ) : <Lock size={64} />
             )
           )}
-        </div>
+        </button>
 
         <div className="text-center">
           <h2 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
             {mode === 'unlock' ? 'Welcome Back' : mode === 'setup' ? (setupStep === 'pin' ? 'Create PIN' : 'Confirm PIN') : 'Verify Old PIN'}
           </h2>
           <p className="text-slate-500 dark:text-slate-400 font-medium text-sm mt-1">
-            {mode === 'unlock' ? 'Enter PIN or use Face ID to unlock' : 
+            {mode === 'unlock' ? 'Enter PIN or tap icon for Face ID / Fingerprint' : 
              mode === 'setup' ? (setupStep === 'pin' ? 'Choose a 4-digit secure code' : 'Repeat the code to confirm') : 
              'Please enter your current PIN to continue'}
           </p>
@@ -416,8 +433,11 @@ export function PINScreen({ settings, onSuccess, mode, onBack, onSetupComplete }
               className="w-16 h-16 rounded-2xl text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 hover:bg-emerald-100 active:scale-95 transition-all flex flex-col items-center justify-center gap-0.5 border border-emerald-200 dark:border-emerald-800/60 shadow-sm"
               title="Scan Face ID or Fingerprint"
             >
-              <ScanFace size={22} />
-              <span className="text-[8px] font-black uppercase tracking-tighter">Face ID</span>
+              <div className="relative flex items-center justify-center">
+                <ScanFace size={22} />
+                <Fingerprint size={12} className="absolute opacity-80" />
+              </div>
+              <span className="text-[7.5px] font-black uppercase tracking-tighter">Biometric</span>
             </button>
           ) : (
             <div className="w-16 h-16" />
