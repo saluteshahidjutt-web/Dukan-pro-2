@@ -1,10 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
 import Papa from 'papaparse';
 import { ShopSettings } from '../types';
-import { Store, Phone, Languages, RefreshCcw, Lock, Shield, Moon, Sun, Image as ImageIcon, FileText, Cloud, LogIn, LogOut, Upload, Mail } from 'lucide-react';
+import { Store, Phone, Languages, RefreshCcw, Lock, Shield, Moon, Sun, Image as ImageIcon, FileText, Cloud, LogIn, LogOut, Upload, Mail, ScanFace, Fingerprint } from 'lucide-react';
 import { ConfirmModal } from './ConfirmModal';
 import { PINScreen } from './PINScreen';
 import { cn } from '../lib/utils';
+import { registerBiometric } from '../lib/biometric';
 import { auth, signInWithPopup, signInWithRedirect, getGoogleProvider, signOut } from '../lib/firebase';
 import { FirestoreService } from '../lib/firestoreService';
 import { LegalModal } from './LegalModal';
@@ -366,10 +367,34 @@ export function Settings({ settings, setSettings }: SettingsProps) {
   const togglePIN = () => {
     if (settings.pinEnabled) {
       if (confirm('Are you sure you want to disable PIN security? This makes your app less secure.')) {
-        setSettings({ ...settings, pinEnabled: false });
+        setSettings({ ...settings, pinEnabled: false, biometricEnabled: false });
       }
     } else {
       setIsPINSetupOpen(true);
+    }
+  };
+
+  const toggleBiometric = async () => {
+    if (settings.biometricEnabled) {
+      setSettings({ ...settings, biometricEnabled: false });
+    } else {
+      if (!settings.pinEnabled || !settings.pinHash) {
+        alert("Please set up a 4-Digit PIN first as a security backup.");
+        setIsPINSetupOpen(true);
+        return;
+      }
+
+      const res = await registerBiometric();
+      if (res.success) {
+        setSettings({
+          ...settings,
+          biometricEnabled: true,
+          biometricCredentialId: res.credentialId,
+        });
+        alert("Face ID / Fingerprint authentication enabled!");
+      } else {
+        alert(res.error || "Biometric activation failed. Please try again.");
+      }
     }
   };
 
@@ -470,6 +495,36 @@ export function Settings({ settings, setSettings }: SettingsProps) {
             >
               Change PIN
             </button>
+          </div>
+        )}
+
+        {/* Face ID / Fingerprint Option */}
+        <div className="pt-4 border-t border-slate-100 dark:border-slate-700/80 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+             <div className="bg-emerald-600 text-white p-2 rounded-xl"><ScanFace size={20}/></div>
+             <div>
+               <h3 className="font-bold dark:text-white text-slate-900">Face ID / Fingerprint</h3>
+               <p className="text-[10px] text-slate-400 font-medium">Unlock app with Face ID or Fingerprint</p>
+             </div>
+          </div>
+          <button 
+            type="button"
+            onClick={toggleBiometric}
+            className={`w-12 h-6 rounded-full transition-all relative ${settings.biometricEnabled ? 'bg-emerald-500' : 'bg-slate-200 dark:bg-slate-700'}`}
+          >
+            <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${settings.biometricEnabled ? 'right-1' : 'left-1'}`} />
+          </button>
+        </div>
+
+        {settings.biometricEnabled && (
+          <div className="pt-2 flex items-center justify-between bg-emerald-50/60 dark:bg-emerald-950/30 p-2.5 rounded-2xl border border-emerald-100 dark:border-emerald-900/40">
+            <div className="flex items-center gap-2">
+              <Fingerprint size={16} className="text-emerald-600 dark:text-emerald-400" />
+              <span className="text-[10px] font-bold text-emerald-800 dark:text-emerald-300 uppercase tracking-wider">Face ID / Fingerprint Active</span>
+            </div>
+            <span className="text-[9px] font-black bg-emerald-200/80 dark:bg-emerald-800/80 text-emerald-900 dark:text-emerald-100 px-2.5 py-0.5 rounded-full uppercase">
+              ENABLED
+            </span>
           </div>
         )}
       </section>

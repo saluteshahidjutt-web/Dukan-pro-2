@@ -345,7 +345,7 @@ function MainApp() {
     return <Onboarding />;
   }
 
-  if (isLocked && shopSettings.pinEnabled) {
+  if (isLocked && (shopSettings.pinEnabled || shopSettings.biometricEnabled)) {
     return (
       <PINScreen 
         settings={shopSettings} 
@@ -671,7 +671,7 @@ function MainApp() {
           </div>
           
           <div className="flex items-center gap-2 md:gap-4">
-            {user && shopSettings.pinEnabled && (
+            {user && (shopSettings.pinEnabled || shopSettings.biometricEnabled) && (
               <button 
                 onClick={() => setIsLocked(true)}
                 className="p-2 text-slate-400 bg-slate-100 rounded-xl hover:bg-indigo-50 hover:text-indigo-600 transition-all active:scale-95"
@@ -813,7 +813,7 @@ function MainApp() {
       </div>
 
       {/* Bottom Navigation */}
-      {!isNavHidden && (
+      {!isNavHidden && !isSidebarOpen && activeTab !== 'settings' && activeTab !== 'expenses' && (
         <>
           {/* Desktop Hover Trigger Zone (Bottom 30px) */}
           {!isMobile && !isNavLocked && (

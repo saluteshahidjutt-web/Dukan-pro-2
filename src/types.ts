@@ -66,6 +66,9 @@ export interface ShopSettings {
   language: 'en' | 'ur' | 'roman';
   pinEnabled?: boolean;
   pinHash?: string;
+  biometricEnabled?: boolean;
+  biometricType?: 'face' | 'fingerprint' | 'biometric';
+  biometricCredentialId?: string;
   securityQuestion?: string;
   securityAnswerHash?: string;
   logoUrl?: string;
