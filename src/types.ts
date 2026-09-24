@@ -78,6 +78,7 @@ export interface ShopSettings {
   theme?: 'light' | 'dark';
   ownerEmail?: string;
   chatEnabled?: boolean;
+  phoneVerified?: boolean;
 }
 
 export interface UserProfile {
@@ -85,6 +86,8 @@ export interface UserProfile {
   uid: string;
   name: string;
   phone: string;
+  phoneVerified?: boolean;
+  email?: string;
   photoURL?: string;
   status?: string;
   updatedAt: string;
@@ -106,6 +109,7 @@ export interface ChatRoom {
   lastMessageType?: 'text' | 'voice' | 'image' | 'call';
   lastMessageSenderId?: string;
   lastMessageCallStatus?: 'missed' | 'completed' | 'rejected' | 'busy';
+  lastMessageCallType?: 'voice' | 'video';
   updatedAt: string;
 }
 
@@ -121,6 +125,7 @@ export interface ChatMessage {
   imageData?: string; // compressed base64 image
   callInfo?: {
     callId?: string;
+    callType?: 'voice' | 'video';
     status: 'missed' | 'completed' | 'rejected' | 'busy';
     duration?: number; // duration in seconds if connected
     callerId: string;
@@ -139,6 +144,7 @@ export interface CallSession {
   receiverName: string;
   receiverPhone: string;
   receiverPhoto?: string;
+  callType?: 'voice' | 'video';
   status: 'ringing' | 'connected' | 'ended' | 'rejected' | 'busy';
   offer?: any;
   answer?: any;

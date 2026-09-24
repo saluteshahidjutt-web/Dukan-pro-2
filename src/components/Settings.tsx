@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import Papa from 'papaparse';
 import { ShopSettings } from '../types';
-import { Store, Phone, Languages, RefreshCcw, Lock, Shield, Moon, Sun, Image as ImageIcon, FileText, Cloud, LogIn, LogOut, Upload, Mail, ScanFace, Fingerprint, MessageSquare } from 'lucide-react';
+import { Store, Phone, Languages, RefreshCcw, Lock, Shield, Moon, Sun, Image as ImageIcon, FileText, Cloud, LogIn, LogOut, Upload, Mail, ScanFace, Fingerprint, MessageSquare, Trash2, CheckCircle2 } from 'lucide-react';
 import { ConfirmModal } from './ConfirmModal';
 import { PINScreen } from './PINScreen';
 import { cn } from '../lib/utils';
@@ -32,6 +32,29 @@ export function Settings({ settings, setSettings }: SettingsProps) {
   const [generatedSettingsOtp, setGeneratedSettingsOtp] = useState('');
   const [enteredSettingsOtp, setEnteredSettingsOtp] = useState('');
   const [isSavingSettingsPhone, setIsSavingSettingsPhone] = useState(false);
+  const [isDeletingPhone, setIsDeletingPhone] = useState(false);
+  const [isConfirmingDeletePhone, setIsConfirmingDeletePhone] = useState(false);
+
+  // Sync verified status from user profile on mount
+  useEffect(() => {
+    const checkUserPhoneVerified = async () => {
+      const user = auth.currentUser;
+      if (!user) return;
+      try {
+        const profile = await FirestoreService.getUserProfile(user.uid);
+        if (profile && profile.phone && profile.phone.trim().length >= 9) {
+          setSettings(prev => ({
+            ...prev,
+            phone: profile.phone,
+            phoneVerified: profile.phoneVerified !== false
+          }));
+        }
+      } catch (e) {
+        console.warn("Check user profile phone verified err:", e);
+      }
+    };
+    checkUserPhoneVerified();
+  }, []);
 
   const handleSavePhoneAndTriggerWhatsAppOtp = async () => {
     const digits = (settings.phone || '').replace(/[^0-9]/g, '');
@@ -40,6 +63,22 @@ export function Settings({ settings, setSettings }: SettingsProps) {
       setPhoneStatusMsg('Phone number kam az kam 10 ya 11 digits ka hona chahiye (e.g. 03001234567)');
       return;
     }
+
+    // Strict 1-to-1 account check: Verify if phone number is already registered to another account/email
+    setIsSavingSettingsPhone(true);
+    try {
+      const availability = await FirestoreService.checkPhoneAvailability(settings.phone || '');
+      if (!availability.available) {
+        setPhoneStatusIsError(true);
+        const otherInfo = availability.existingUser?.email ? ` (${availability.existingUser.email})` : '';
+        setPhoneStatusMsg(`❌ This phone number is already registered with another account${otherInfo}. One number can only be connected to one user account / email.`);
+        setIsSavingSettingsPhone(false);
+        return;
+      }
+    } catch (e) {
+      console.warn("Phone availability check error:", e);
+    }
+    setIsSavingSettingsPhone(false);
 
     setPhoneStatusIsError(false);
     setPhoneStatusMsg('');
@@ -79,21 +118,54 @@ export function Settings({ settings, setSettings }: SettingsProps) {
     setIsSavingSettingsPhone(true);
     setPhoneStatusIsError(false);
     try {
-      await FirestoreService.saveSettings({
-        ...settings,
-        phone: settings.phone
-      });
+      // 1. Update user profile (enforces uniqueness check and marks phoneVerified = true)
       await FirestoreService.updateUserProfilePhone(settings.phone, settings.name);
+      
+      // 2. Save settings with phoneVerified: true
+      const updated: ShopSettings = {
+        ...settings,
+        phone: settings.phone,
+        phoneVerified: true
+      };
+      await FirestoreService.saveSettings(updated);
+      setSettings(updated);
       
       setSettingsOtpStep('none');
       setPhoneStatusIsError(false);
       setPhoneStatusMsg('✅ Mobile Number Success! Profile & Database mein verified save ho gaya hai.');
-    } catch (err) {
+    } catch (err: any) {
       console.error("Save phone error in settings:", err);
       setPhoneStatusIsError(true);
-      setPhoneStatusMsg('Failed to save. Network check karein.');
+      setPhoneStatusMsg(err?.message || 'Failed to save. Network check karein.');
     } finally {
       setIsSavingSettingsPhone(false);
+    }
+  };
+
+  const handleDeletePhoneNumber = async () => {
+    setIsDeletingPhone(true);
+    setPhoneStatusIsError(false);
+    setPhoneStatusMsg('');
+    try {
+      await FirestoreService.deleteUserProfilePhone();
+      const updated: ShopSettings = {
+        ...settings,
+        phone: '',
+        phoneVerified: false
+      };
+      setSettings(updated);
+      setIsConfirmingDeletePhone(false);
+      setSettingsOtpStep('none');
+      setEnteredSettingsOtp('');
+      setGeneratedSettingsOtp('');
+      setPhoneStatusIsError(false);
+      setPhoneStatusMsg('✅ Phone number delete ho gaya! Aap ka number aur chat search record mukammal khatam kar diya gaya hai.');
+    } catch (err: any) {
+      console.error("Delete phone error in settings:", err);
+      setPhoneStatusIsError(true);
+      setPhoneStatusMsg(err?.message || 'Failed to delete phone number. Network check karein.');
+    } finally {
+      setIsDeletingPhone(false);
     }
   };
 
@@ -691,66 +763,140 @@ export function Settings({ settings, setSettings }: SettingsProps) {
           <div>
             <div className="flex items-center justify-between mb-1">
               <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Phone Number / Mobile Number</label>
-              {settings.phone && (
+              {settings.phone && settings.phoneVerified ? (
                 <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-extrabold flex items-center gap-1">
-                  ✓ Active Number
+                  <CheckCircle2 size={12} /> Verified Number
                 </span>
-              )}
+              ) : settings.phone ? (
+                <span className="text-[10px] text-amber-600 dark:text-amber-400 font-extrabold flex items-center gap-1">
+                  ⚠️ Unverified Number
+                </span>
+              ) : null}
             </div>
 
-            <div className="flex flex-col sm:flex-row gap-2">
-              <input 
-                type="tel" 
-                placeholder="03001234567"
-                className="flex-1 bg-slate-50 dark:bg-slate-700 border-none rounded-xl py-3 px-4 text-sm font-bold dark:text-white focus:ring-2 focus:ring-emerald-500"
-                value={settings.phone}
-                onChange={(e) => {
-                  setSettings({...settings, phone: e.target.value});
-                  setPhoneStatusMsg('');
-                  setPhoneStatusIsError(false);
-                }}
-              />
-              <button
-                type="button"
-                onClick={handleSavePhoneAndTriggerWhatsAppOtp}
-                className="shrink-0 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white px-4 py-3 rounded-xl text-xs font-black shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-1.5 transition-all"
-              >
-                <span>📱 Save Number & Verify via WhatsApp</span>
-              </button>
-            </div>
-
-            {settingsOtpStep === 'verify_otp' && (
-              <div className="mt-3 p-4 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 rounded-2xl space-y-3 animate-in fade-in">
-                <div className="text-center">
-                  <p className="text-xs font-black text-emerald-900 dark:text-emerald-200">
-                    📱 WhatsApp OTP Verification
-                  </p>
-                  <p className="text-[11px] text-emerald-800 dark:text-emerald-300 mt-1 font-medium">
-                    Enter six digit code received from WhatsApp
-                  </p>
+            {settings.phone && settings.phoneVerified ? (
+              /* --- STATE 1: ALREADY VERIFIED NUMBER --- */
+              <div className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="tel" 
+                    readOnly
+                    className="flex-1 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-none rounded-xl py-3 px-4 text-sm font-mono font-bold cursor-not-allowed opacity-90"
+                    value={settings.phone}
+                  />
                 </div>
 
-                <div className="space-y-2 max-w-xs mx-auto">
-                  <input
-                    type="text"
-                    maxLength={6}
-                    placeholder="Enter 6-digit code"
-                    value={enteredSettingsOtp}
+                <div className="p-3 bg-emerald-50/70 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/80 rounded-xl flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-full bg-emerald-100 dark:bg-emerald-900/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                      <CheckCircle2 size={16} />
+                    </div>
+                    <div>
+                      <p className="text-xs font-black text-emerald-900 dark:text-emerald-200">
+                        WhatsApp Number Verified & Active
+                      </p>
+                      <p className="text-[10px] text-emerald-700 dark:text-emerald-400 font-medium">
+                        Aap ka number verified hai aur chat discovery ke liye active hai.
+                      </p>
+                    </div>
+                  </div>
+
+                  {!isConfirmingDeletePhone ? (
+                    <button
+                      type="button"
+                      onClick={() => setIsConfirmingDeletePhone(true)}
+                      className="bg-rose-50 hover:bg-rose-100 active:scale-95 text-rose-600 dark:bg-rose-950/60 dark:hover:bg-rose-900/60 dark:text-rose-400 border border-rose-200 dark:border-rose-800 font-black text-xs px-3.5 py-2 rounded-xl flex items-center justify-center gap-1.5 transition-all shrink-0"
+                    >
+                      <Trash2 size={14} />
+                      <span>Delete Number</span>
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        disabled={isDeletingPhone}
+                        onClick={handleDeletePhoneNumber}
+                        className="bg-rose-600 hover:bg-rose-700 active:scale-95 text-white font-black text-xs px-3.5 py-2 rounded-xl flex items-center justify-center gap-1.5 shadow transition-all"
+                      >
+                        <Trash2 size={13} />
+                        <span>{isDeletingPhone ? 'Deleting...' : 'Confirm Delete'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isDeletingPhone}
+                        onClick={() => setIsConfirmingDeletePhone(false)}
+                        className="bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 font-bold text-xs px-3 py-2 rounded-xl transition-all"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {isConfirmingDeletePhone && (
+                  <p className="text-[11px] text-rose-600 dark:text-rose-400 font-bold px-1">
+                    ⚠️ Number delete karne se aap ka number aur chat search record mukammal khatam ho jaye ga aur koi is number par chat nahi kar sake ga.
+                  </p>
+                )}
+              </div>
+            ) : (
+              /* --- STATE 2: UNVERIFIED OR NEW NUMBER --- */
+              <div className="space-y-2">
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input 
+                    type="tel" 
+                    placeholder="03001234567"
+                    className="flex-1 bg-slate-50 dark:bg-slate-700 border-none rounded-xl py-3 px-4 text-sm font-bold dark:text-white focus:ring-2 focus:ring-emerald-500"
+                    value={settings.phone}
                     onChange={(e) => {
-                      setEnteredSettingsOtp(e.target.value.replace(/[^0-9]/g, ''));
+                      setSettings({...settings, phone: e.target.value});
                       setPhoneStatusMsg('');
+                      setPhoneStatusIsError(false);
                     }}
-                    className="w-full text-center font-mono tracking-widest text-base px-3 py-2.5 bg-white dark:bg-slate-800 border border-emerald-300 dark:border-emerald-700 rounded-xl font-bold dark:text-white focus:ring-2 focus:ring-emerald-500"
                   />
                   <button
                     type="button"
-                    disabled={isSavingSettingsPhone}
-                    onClick={handleVerifySettingsOtpAndSave}
-                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-xl text-xs font-black shadow transition-all"
+                    onClick={handleSavePhoneAndTriggerWhatsAppOtp}
+                    className="shrink-0 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white px-4 py-3 rounded-xl text-xs font-black shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-1.5 transition-all"
                   >
-                    {isSavingSettingsPhone ? 'Saving...' : 'Verify & Save'}
+                    <span>📱 Save Number & Verify via WhatsApp</span>
                   </button>
                 </div>
+
+                {settingsOtpStep === 'verify_otp' && (
+                  <div className="mt-3 p-4 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 rounded-2xl space-y-3 animate-in fade-in">
+                    <div className="text-center">
+                      <p className="text-xs font-black text-emerald-900 dark:text-emerald-200">
+                        📱 WhatsApp OTP Verification
+                      </p>
+                      <p className="text-[11px] text-emerald-800 dark:text-emerald-300 mt-1 font-medium">
+                        Enter six digit code received from WhatsApp
+                      </p>
+                    </div>
+
+                    <div className="space-y-2 max-w-xs mx-auto">
+                      <input
+                        type="text"
+                        maxLength={6}
+                        placeholder="Enter 6-digit code"
+                        value={enteredSettingsOtp}
+                        onChange={(e) => {
+                          setEnteredSettingsOtp(e.target.value.replace(/[^0-9]/g, ''));
+                          setPhoneStatusMsg('');
+                        }}
+                        className="w-full text-center font-mono tracking-widest text-base px-3 py-2.5 bg-white dark:bg-slate-800 border border-emerald-300 dark:border-emerald-700 rounded-xl font-bold dark:text-white focus:ring-2 focus:ring-emerald-500"
+                      />
+                      <button
+                        type="button"
+                        disabled={isSavingSettingsPhone}
+                        onClick={handleVerifySettingsOtpAndSave}
+                        className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-xl text-xs font-black shadow transition-all"
+                      >
+                        {isSavingSettingsPhone ? 'Saving...' : 'Verify & Save'}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 

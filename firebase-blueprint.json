@@ -104,6 +104,8 @@
         "uid": { "type": "string" },
         "name": { "type": "string" },
         "phone": { "type": "string" },
+        "phoneVerified": { "type": "boolean" },
+        "email": { "type": "string" },
         "photoURL": { "type": "string" },
         "status": { "type": "string" },
         "updatedAt": { "type": "string" }
@@ -146,7 +148,7 @@
     },
     "CallSession": {
       "title": "CallSession",
-      "description": "WebRTC voice call signaling session",
+      "description": "WebRTC voice and video call signaling session",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
@@ -156,6 +158,7 @@
         "receiverId": { "type": "string" },
         "receiverName": { "type": "string" },
         "receiverPhone": { "type": "string" },
+        "callType": { "type": "string", "enum": ["voice", "video"] },
         "status": { "type": "string" },
         "createdAt": { "type": "string" }
       },

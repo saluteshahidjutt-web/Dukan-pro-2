@@ -51,7 +51,73 @@ export const getChatRoomId = (uid1: string, uid2: string): string => {
   return `room_${sortedClean[0]}_${sortedClean[1]}`;
 };
 
+// Helper: Normalize phone numbers across formats (+92, 92, 03xx, 3xx)
+export const normalizePhoneNumber = (phone: string): { standard: string; withoutZero: string; withCountry: string; canonical: string } => {
+  const rawDigits = phone.replace(/[^0-9]/g, '');
+  let standard = rawDigits;
+  let withoutZero = rawDigits;
+  let withCountry = rawDigits;
+  let canonical = rawDigits;
+
+  if (rawDigits.startsWith('92') && rawDigits.length >= 11) {
+    withoutZero = rawDigits.slice(2);
+    standard = '0' + withoutZero;
+    withCountry = rawDigits;
+    canonical = withoutZero;
+  } else if (rawDigits.startsWith('0') && rawDigits.length >= 10) {
+    withoutZero = rawDigits.slice(1);
+    standard = rawDigits;
+    withCountry = '92' + withoutZero;
+    canonical = withoutZero;
+  } else if (rawDigits.length === 10) {
+    withoutZero = rawDigits;
+    standard = '0' + rawDigits;
+    withCountry = '92' + rawDigits;
+    canonical = rawDigits;
+  }
+
+  return { standard, withoutZero, withCountry, canonical };
+};
+
 export const FirestoreService = {
+  // Check if a phone number is already registered by another account / user email
+  checkPhoneAvailability: async (phoneInput: string): Promise<{ available: boolean; existingUser?: { uid: string; email?: string; name?: string } }> => {
+    const currentUid = auth.currentUser?.uid;
+    const cleanDigits = phoneInput.replace(/[^0-9]/g, '');
+    if (!cleanDigits || cleanDigits.length < 9) {
+      return { available: true };
+    }
+
+    const { standard, withoutZero, withCountry, canonical } = normalizePhoneNumber(phoneInput);
+    const variants = Array.from(new Set([standard, withoutZero, withCountry, canonical, cleanDigits])).filter(v => v.length >= 9);
+
+    try {
+      const usersRef = collection(db, 'users');
+      for (const variant of variants) {
+        const q = query(usersRef, where('phone', '==', variant), limit(5));
+        const snap = await getDocs(q);
+        for (const docSnap of snap.docs) {
+          const data = docSnap.data() as UserProfile & { email?: string };
+          // If another user (different UID) is using this phone number
+          if (docSnap.id !== currentUid && data.uid !== currentUid) {
+            return {
+              available: false,
+              existingUser: {
+                uid: data.uid || docSnap.id,
+                email: data.email,
+                name: data.name
+              }
+            };
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("checkPhoneAvailability notice:", e);
+    }
+
+    return { available: true };
+  },
+
   // --- Sync Logic ---
   syncLocalToCloud: async (userId: string) => {
     try {
@@ -668,12 +734,13 @@ export const FirestoreService = {
     const user = auth.currentUser;
     if (!user) return;
     try {
-      const cleanedPhone = profile.phone.replace(/[\s\-\+]/g, '');
+      const { standard } = normalizePhoneNumber(profile.phone);
       const userDoc: UserProfile = {
         id: user.uid,
         uid: user.uid,
         name: profile.name,
-        phone: cleanedPhone,
+        phone: standard,
+        email: user.email || '',
         photoURL: profile.photoURL || user.photoURL || '',
         status: 'Hey there! I am using Dukaan Pro Chat',
         updatedAt: new Date().toISOString()
@@ -687,39 +754,34 @@ export const FirestoreService = {
   updateUserProfilePhone: async (phone: string, name?: string) => {
     const user = auth.currentUser;
     if (!user) return false;
-    const cleanPhone = phone.trim().replace(/[\s\-\+]/g, '');
-    try {
-      // 1. Check if another user profile previously held this phone number
-      try {
-        const usersRef = collection(db, 'users');
-        const existingQuery = query(usersRef, where('phone', '==', cleanPhone), limit(5));
-        const snap = await getDocs(existingQuery);
-        for (const docSnap of snap.docs) {
-          if (docSnap.id !== user.uid) {
-            // Detach duplicate phone from previous account so incoming calls/search map strictly to current active user
-            await setDoc(doc(db, 'users', docSnap.id), {
-              phone: '',
-              phoneTransferredTo: user.uid,
-              updatedAt: new Date().toISOString()
-            }, { merge: true }).catch(() => {});
-          }
-        }
-      } catch (e) {
-        console.warn("Phone duplicate check skipped or offline:", e);
-      }
+    const { standard } = normalizePhoneNumber(phone);
+    if (!standard || standard.length < 9) return false;
 
-      // 2. Set phone on current user's profile
+    // 1. Strict 1-to-1 account enforcement: Verify this number is NOT claimed by another email / account
+    const availability = await FirestoreService.checkPhoneAvailability(standard);
+    if (!availability.available) {
+      const otherInfo = availability.existingUser?.email ? ` (${availability.existingUser.email})` : '';
+      throw new Error(`This phone number is already registered with another account${otherInfo}. One number can only be connected to one user account / email.`);
+    }
+
+    try {
+      // 2. Set phone and email on current user's profile with phoneVerified = true
       await setDoc(doc(db, 'users', user.uid), {
         id: user.uid,
         uid: user.uid,
-        phone: cleanPhone,
-        ...(name ? { name } : {}),
+        phone: standard,
+        phoneVerified: true,
+        email: user.email || '',
+        name: name || user.displayName || 'User',
+        photoURL: user.photoURL || '',
+        status: 'Hey there! I am using Dukaan Pro Chat',
         updatedAt: new Date().toISOString()
       }, { merge: true });
 
       const settingsRef = doc(db, 'settings', user.uid);
       await updateDoc(settingsRef, {
-        phone: cleanPhone,
+        phone: standard,
+        phoneVerified: true,
         ...(name ? { name } : {}),
         updatedAt: new Date().toISOString()
       }).catch(() => {});
@@ -728,14 +790,63 @@ export const FirestoreService = {
       if (localSettings) {
         setLocal(LOCAL_KEYS.SETTINGS, {
           ...localSettings,
-          phone: cleanPhone,
+          phone: standard,
+          phoneVerified: true,
           ...(name ? { name } : {})
         });
       }
       return true;
     } catch (e) {
       console.warn("Update user profile phone err:", e);
-      return false;
+      throw e;
+    }
+  },
+
+  getUserProfile: async (uid: string): Promise<UserProfile | null> => {
+    try {
+      const snap = await getDoc(doc(db, 'users', uid));
+      if (snap.exists()) {
+        return snap.data() as UserProfile;
+      }
+      return null;
+    } catch (e) {
+      console.warn("getUserProfile error:", e);
+      return null;
+    }
+  },
+
+  deleteUserProfilePhone: async (): Promise<boolean> => {
+    const user = auth.currentUser;
+    if (!user) return false;
+    try {
+      // 1. Clear phone & phoneVerified from public users collection
+      await setDoc(doc(db, 'users', user.uid), {
+        phone: '',
+        phoneVerified: false,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+
+      // 2. Clear phone in settings collection
+      const settingsRef = doc(db, 'settings', user.uid);
+      await updateDoc(settingsRef, {
+        phone: '',
+        phoneVerified: false,
+        updatedAt: new Date().toISOString()
+      }).catch(() => {});
+
+      // 3. Clear phone in localStorage
+      const localSettings = getLocal<ShopSettings | null>(LOCAL_KEYS.SETTINGS, null);
+      if (localSettings) {
+        setLocal(LOCAL_KEYS.SETTINGS, {
+          ...localSettings,
+          phone: '',
+          phoneVerified: false
+        });
+      }
+      return true;
+    } catch (e) {
+      console.warn("Delete user profile phone error:", e);
+      throw e;
     }
   },
 
@@ -771,59 +882,83 @@ export const FirestoreService = {
   searchUserByPhone: async (phoneInput: string): Promise<UserProfile[]> => {
     if (!phoneInput || phoneInput.trim().length < 2) return [];
     const clean = phoneInput.replace(/[\s\-\+]/g, '');
+    const currentUid = auth.currentUser?.uid;
+    const rawResults: UserProfile[] = [];
+
     try {
       const usersRef = collection(db, 'users');
       // Search with prefix
-      const q = query(usersRef, where('phone', '>=', clean), where('phone', '<=', clean + '\uf8ff'), limit(15));
+      const q = query(usersRef, where('phone', '>=', clean), where('phone', '<=', clean + '\uf8ff'), limit(25));
       const snap = await getDocs(q);
-      const results: UserProfile[] = [];
       snap.forEach(docSnap => {
         const u = docSnap.data() as UserProfile;
-        if (u.uid !== auth.currentUser?.uid) {
-          results.push(u);
+        if (u.uid !== currentUid && !rawResults.some(r => r.uid === u.uid)) {
+          rawResults.push(u);
         }
       });
 
       // If user typed e.g. "0321..." but database stored without leading 0 (e.g. "321...")
-      if (clean.startsWith('0') && results.length === 0) {
+      if (clean.startsWith('0')) {
         const withoutZero = clean.substring(1);
-        const q2 = query(usersRef, where('phone', '>=', withoutZero), where('phone', '<=', withoutZero + '\uf8ff'), limit(15));
+        const q2 = query(usersRef, where('phone', '>=', withoutZero), where('phone', '<=', withoutZero + '\uf8ff'), limit(25));
         const snap2 = await getDocs(q2);
         snap2.forEach(docSnap => {
           const u = docSnap.data() as UserProfile;
-          if (u.uid !== auth.currentUser?.uid && !results.some(r => r.uid === u.uid)) {
-            results.push(u);
+          if (u.uid !== currentUid && !rawResults.some(r => r.uid === u.uid)) {
+            rawResults.push(u);
           }
         });
       }
 
       // If clean starts with "92" (Pakistan country code) and database has "03..."
-      if (clean.startsWith('92') && results.length === 0) {
+      if (clean.startsWith('92')) {
         const withZero = '0' + clean.substring(2);
-        const q3 = query(usersRef, where('phone', '>=', withZero), where('phone', '<=', withZero + '\uf8ff'), limit(15));
+        const q3 = query(usersRef, where('phone', '>=', withZero), where('phone', '<=', withZero + '\uf8ff'), limit(25));
         const snap3 = await getDocs(q3);
         snap3.forEach(docSnap => {
           const u = docSnap.data() as UserProfile;
-          if (u.uid !== auth.currentUser?.uid && !results.some(r => r.uid === u.uid)) {
-            results.push(u);
+          if (u.uid !== currentUid && !rawResults.some(r => r.uid === u.uid)) {
+            rawResults.push(u);
           }
         });
       }
 
       // If clean doesn't start with 0 or 92 (e.g. "321..."), also check "0321..."
-      if (!clean.startsWith('0') && !clean.startsWith('92') && results.length === 0) {
+      if (!clean.startsWith('0') && !clean.startsWith('92')) {
         const withZero = '0' + clean;
-        const q4 = query(usersRef, where('phone', '>=', withZero), where('phone', '<=', withZero + '\uf8ff'), limit(15));
+        const q4 = query(usersRef, where('phone', '>=', withZero), where('phone', '<=', withZero + '\uf8ff'), limit(25));
         const snap4 = await getDocs(q4);
         snap4.forEach(docSnap => {
           const u = docSnap.data() as UserProfile;
-          if (u.uid !== auth.currentUser?.uid && !results.some(r => r.uid === u.uid)) {
-            results.push(u);
+          if (u.uid !== currentUid && !rawResults.some(r => r.uid === u.uid)) {
+            rawResults.push(u);
           }
         });
       }
 
-      return results;
+      // STRICT 1-TO-1 DEDUPLICATION BY PHONE NUMBER:
+      // A single phone number must NEVER produce 2 chats or 2 users in search results!
+      // If legacy duplicate accounts share the same phone number, only keep the single
+      // most recently active account (by updatedAt).
+      const phoneMap = new Map<string, UserProfile>();
+      for (const u of rawResults) {
+        if (!u.phone) continue;
+        const norm = u.phone.replace(/[^0-9]/g, '');
+        const canonical = norm.startsWith('92') ? norm.slice(2) : (norm.startsWith('0') ? norm.slice(1) : norm);
+
+        const existing = phoneMap.get(canonical);
+        if (!existing) {
+          phoneMap.set(canonical, u);
+        } else {
+          const existingTime = new Date(existing.updatedAt || 0).getTime();
+          const currentTime = new Date(u.updatedAt || 0).getTime();
+          if (currentTime >= existingTime) {
+            phoneMap.set(canonical, u);
+          }
+        }
+      }
+
+      return Array.from(phoneMap.values());
     } catch (e) {
       console.warn("Search user by phone error:", e);
       return [];
@@ -1040,7 +1175,8 @@ export const FirestoreService = {
     receiver: { uid: string; name: string; phone?: string; photoURL?: string },
     status: 'missed' | 'completed' | 'rejected' | 'busy',
     durationSeconds: number = 0,
-    callId?: string
+    callId?: string,
+    callType: 'voice' | 'video' = 'voice'
   ) => {
     try {
       const sortedParticipants = [caller.uid, receiver.uid].sort();
@@ -1075,18 +1211,22 @@ export const FirestoreService = {
         ? `${mins}m ${secs}s`
         : `${secs}s`;
 
-      let callText = 'Missed voice call';
-      let previewText = '📞 Missed voice call';
+      const isVideo = callType === 'video';
+      const icon = isVideo ? '📹' : '📞';
+      const label = isVideo ? 'video call' : 'voice call';
+
+      let callText = isVideo ? 'Missed video call' : 'Missed voice call';
+      let previewText = `${icon} ${isVideo ? 'Missed video call' : 'Missed voice call'}`;
 
       if (status === 'completed') {
-        callText = `Voice call (${formattedDuration})`;
-        previewText = `📞 Voice call (${formattedDuration})`;
+        callText = `${isVideo ? 'Video call' : 'Voice call'} (${formattedDuration})`;
+        previewText = `${icon} ${isVideo ? 'Video call' : 'Voice call'} (${formattedDuration})`;
       } else if (status === 'rejected') {
-        callText = 'Call declined';
-        previewText = '📞 Call declined';
+        callText = isVideo ? 'Video call declined' : 'Call declined';
+        previewText = `${icon} ${isVideo ? 'Video call declined' : 'Call declined'}`;
       } else if (status === 'busy') {
         callText = 'Line busy';
-        previewText = '📞 Line busy';
+        previewText = `${icon} Line busy`;
       }
 
       const chatMsg: ChatMessage = {
@@ -1098,6 +1238,7 @@ export const FirestoreService = {
         text: callText,
         callInfo: {
           callId: callId || msgId,
+          callType,
           status,
           duration: durationSeconds,
           callerId: caller.uid,
@@ -1113,6 +1254,7 @@ export const FirestoreService = {
         lastMessageType: 'call',
         lastMessageSenderId: caller.uid,
         lastMessageCallStatus: status,
+        lastMessageCallType: callType,
         updatedAt: new Date().toISOString()
       }).catch(e => {
         console.warn("Could not update chat room call preview:", e);

@@ -66,7 +66,11 @@ class DeviceNotificationService {
   }
 
   // Show System Notification for Incoming Call
-  public async showIncomingCallNotification(caller: { name: string; phone?: string }, callId: string) {
+  public async showIncomingCallNotification(
+    caller: { name: string; phone?: string }, 
+    callId: string, 
+    callType: 'voice' | 'video' = 'voice'
+  ) {
     this.startIncomingCallVibration();
 
     if (!this.isSupported() || Notification.permission !== 'granted') {
@@ -74,9 +78,10 @@ class DeviceNotificationService {
     }
 
     try {
-      const title = `📞 Incoming Call: ${caller.name}`;
+      const isVideo = callType === 'video';
+      const title = isVideo ? `📹 Incoming Video Call: ${caller.name}` : `📞 Incoming Voice Call: ${caller.name}`;
       const options: any = {
-        body: `${caller.phone ? `${caller.phone} • ` : ''}Dukaan Web Call - Tap to open & answer`,
+        body: `${caller.phone ? `${caller.phone} • ` : ''}${isVideo ? 'Dukaan Video Call' : 'Dukaan Web Call'} - Tap to answer`,
         icon: '/pwa-icon.svg',
         badge: '/pwa-icon.svg',
         tag: `call_${callId}`,

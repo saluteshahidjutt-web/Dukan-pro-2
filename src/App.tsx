@@ -189,7 +189,6 @@ function MainApp() {
           console.error("Sync after redirect failed:", err);
         }).finally(() => {
           setIsSyncing(false);
-          alert("Dukaan Pro Cloud Sync Active! Ap ka data ab mehfooz hai.");
         });
       }
     }).catch((error) => {
@@ -221,9 +220,11 @@ function MainApp() {
       if (call) {
         setIncomingCall(call);
         webrtcService.playIncomingRingtone();
+        const callLabel = call.callType === 'video' ? 'Incoming Video Call 📹' : undefined;
         notificationService.showIncomingCallNotification(
           { name: call.callerName, phone: call.callerPhone },
-          call.id
+          call.id,
+          call.callType
         );
       } else {
         setIncomingCall(null);
@@ -237,7 +238,10 @@ function MainApp() {
     };
   }, [user]);
 
-  const handleStartVoiceCall = async (targetUser: { uid: string; name: string; phone: string; photoURL?: string }) => {
+  const handleStartCall = async (
+    targetUser: { uid: string; name: string; phone: string; photoURL?: string },
+    callType: 'voice' | 'video' = 'voice'
+  ) => {
     if (!user) return;
     try {
       const myPhoto = shopSettings.logoUrl || shopSettings.photoURL || user.photoURL || '';
@@ -257,6 +261,7 @@ function MainApp() {
         receiverName: targetUser.name,
         receiverPhone: targetUser.phone,
         receiverPhoto: targetUser.photoURL || '',
+        callType: callType,
         status: 'ringing',
         createdAt: new Date().toISOString()
       };
@@ -268,13 +273,20 @@ function MainApp() {
         } else {
           setCurrentCall(prev => prev ? { ...prev, status } : null);
         }
-      });
+      }, callType);
       setCurrentCall(prev => prev ? { ...prev, id: callId } : null);
     } catch (e) {
-      console.error("Start call failed:", e);
-      alert("Call connect nahi ho saki. Browser mein Microphone permission allow karein.");
+      console.warn("Start call caught error:", e);
       setCurrentCall(null);
     }
+  };
+
+  const handleStartVoiceCall = (targetUser: { uid: string; name: string; phone: string; photoURL?: string }) => {
+    return handleStartCall(targetUser, 'voice');
+  };
+
+  const handleStartVideoCall = (targetUser: { uid: string; name: string; phone: string; photoURL?: string }) => {
+    return handleStartCall(targetUser, 'video');
   };
 
   const handleAcceptIncomingCall = async () => {
@@ -665,6 +677,7 @@ function MainApp() {
           initialChatUserName={chatTargetUser?.name}
           initialChatUserPhone={chatTargetUser?.phone}
           onStartVoiceCall={handleStartVoiceCall}
+          onStartVideoCall={handleStartVideoCall}
         />;
       case 'inventory':
         return <Inventory 

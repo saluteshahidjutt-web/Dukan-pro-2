@@ -22,7 +22,8 @@ import {
   Bell,
   CheckCircle,
   Edit3,
-  AlertCircle
+  AlertCircle,
+  Video
 } from 'lucide-react';
 import { auth } from '../lib/firebase';
 import { FirestoreService } from '../lib/firestoreService';
@@ -55,6 +56,7 @@ interface ChatHubProps {
   initialChatUserPhone?: string;
   initialChatUserName?: string;
   onStartVoiceCall?: (targetUser: { uid: string; name: string; phone: string; photoURL?: string }) => void;
+  onStartVideoCall?: (targetUser: { uid: string; name: string; phone: string; photoURL?: string }) => void;
 }
 
 export function ChatHub({ 
@@ -63,7 +65,8 @@ export function ChatHub({
   initialChatUserId,
   initialChatUserPhone,
   initialChatUserName,
-  onStartVoiceCall
+  onStartVoiceCall,
+  onStartVideoCall
 }: ChatHubProps) {
   const currentUid = auth.currentUser?.uid;
   const [chatRooms, setChatRooms] = useState<ChatRoom[]>([]);
@@ -230,20 +233,28 @@ export function ChatHub({
     }
   };
 
-  const handleCallFromHistory = (call: CallSession) => {
-    if (!onStartVoiceCall) return;
+  const handleCallFromHistory = (call: CallSession, forceType?: 'voice' | 'video') => {
     const isMeCaller = call.callerId === currentUid;
     const targetUid = isMeCaller ? call.receiverId : call.callerId;
     const targetName = (isMeCaller ? call.receiverName : call.callerName) || 'User';
     const targetPhone = (isMeCaller ? call.receiverPhone : call.callerPhone) || '';
     const targetPhoto = isMeCaller ? call.receiverPhoto : call.callerPhoto;
 
-    onStartVoiceCall({
+    const target = {
       uid: targetUid,
       name: targetName,
       phone: targetPhone,
       photoURL: targetPhoto
-    });
+    };
+
+    const type = forceType || call.callType || 'voice';
+    if (type === 'video') {
+      if (!onStartVideoCall) return;
+      onStartVideoCall(target);
+    } else {
+      if (!onStartVoiceCall) return;
+      onStartVoiceCall(target);
+    }
   };
 
   const handleChatFromHistory = async (call: CallSession) => {
@@ -593,12 +604,28 @@ export function ChatHub({
     setPhoneError('');
   };
 
-  const handleSendWhatsAppOtp = () => {
+  const handleSendWhatsAppOtp = async () => {
     const digits = phoneModal.phone.replace(/[^0-9]/g, '');
     if (digits.length < 10) {
       setPhoneError("Phone number kam az kam 10 ya 11 digits ka hona chahiye (e.g. 03001234567)");
       return;
     }
+
+    // Strict 1-to-1 account check: Verify if phone number is already registered to another account/email
+    setSavingPhone(true);
+    try {
+      const availability = await FirestoreService.checkPhoneAvailability(phoneModal.phone);
+      if (!availability.available) {
+        const otherInfo = availability.existingUser?.email ? ` (${availability.existingUser.email})` : '';
+        setPhoneError(`❌ This phone number is already registered with another account${otherInfo}. One number can only be connected to one user account / email.`);
+        setSavingPhone(false);
+        return;
+      }
+    } catch (e) {
+      console.warn("Check availability notice:", e);
+    }
+    setSavingPhone(false);
+
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     setGeneratedOtp(code);
     setEnteredOtp('');
@@ -654,9 +681,26 @@ export function ChatHub({
           photoURL: other.photoURL
         });
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Save phone err:", err);
-      setPhoneError("Number save nahi ho saka. Dobara koshish karein.");
+      setPhoneError(err?.message || "Number save nahi ho saka. Dobara koshish karein.");
+    } finally {
+      setSavingPhone(false);
+    }
+  };
+
+  const handleDeleteSelfPhone = async () => {
+    if (!window.confirm("Kya aap apna phone number delete karna chahte hain? Is ke baad is number se chat discovery aur record mukammal khatam ho jaye ga.")) {
+      return;
+    }
+    setSavingPhone(true);
+    setPhoneError('');
+    try {
+      await FirestoreService.deleteUserProfilePhone();
+      setPhoneModal(prev => ({ ...prev, isOpen: false, phone: '' }));
+    } catch (err: any) {
+      console.error("Delete phone err in ChatHub:", err);
+      setPhoneError(err?.message || "Number delete nahi ho saka.");
     } finally {
       setSavingPhone(false);
     }
@@ -674,6 +718,24 @@ export function ChatHub({
     }
 
     onStartVoiceCall?.({
+      uid: otherUid,
+      name: other.name,
+      phone: other.phone || '',
+      photoURL: other.photoURL
+    });
+  };
+
+  const handleInitiateVideoCall = () => {
+    if (!activeRoom) return;
+    const other = getOtherParticipant(activeRoom);
+    const otherUid = activeRoom.participants.find(p => p !== currentUid) || '';
+
+    if (!isValidPhone(settings.phone)) {
+      handleOpenPhoneModal(currentUid || '', settings.name || 'My Profile', settings.phone || '', true);
+      return;
+    }
+
+    onStartVideoCall?.({
       uid: otherUid,
       name: other.name,
       phone: other.phone || '',
@@ -981,11 +1043,19 @@ export function ChatHub({
                           </button>
                           <button
                             type="button"
-                            onClick={() => handleCallFromHistory(call)}
+                            onClick={() => handleCallFromHistory(call, 'voice')}
                             className="p-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl transition-all active:scale-95 shadow-md shadow-emerald-600/30"
-                            title="Call Now"
+                            title="Voice Call"
                           >
                             <Phone size={16} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleCallFromHistory(call, 'video')}
+                            className="p-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl transition-all active:scale-95 shadow-md shadow-teal-600/30"
+                            title="Video Call"
+                          >
+                            <Video size={16} />
                           </button>
                         </div>
                       </div>
@@ -1286,14 +1356,24 @@ export function ChatHub({
                 </div>
 
                 <div className="flex items-center gap-1.5">
-                  {/* Live WebRTC Internet Voice Call (Works on Website & PC & Mobile) */}
+                  {/* Live WebRTC Voice Call */}
                   <button
                     onClick={handleInitiateVoiceCall}
-                    className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl transition-all flex items-center gap-1.5 shadow-sm text-xs font-bold"
-                    title="Live Web Voice Call"
+                    className="px-2.5 sm:px-3 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl transition-all flex items-center gap-1.5 shadow-sm text-xs font-bold"
+                    title="Live Voice Call"
                   >
                     <PhoneCall size={15} />
-                    <span className="hidden sm:inline">Live Call</span>
+                    <span className="hidden sm:inline">Voice Call</span>
+                  </button>
+
+                  {/* Live WebRTC Video Call */}
+                  <button
+                    onClick={handleInitiateVideoCall}
+                    className="px-2.5 sm:px-3 py-2 bg-teal-600 hover:bg-teal-700 active:scale-95 text-white rounded-xl transition-all flex items-center gap-1.5 shadow-sm text-xs font-bold"
+                    title="Live Video Call"
+                  >
+                    <Video size={15} />
+                    <span className="hidden sm:inline">Video Call</span>
                   </button>
 
                   {getOtherParticipant(activeRoom).phone && (
@@ -1401,7 +1481,9 @@ export function ChatHub({
                                     ? "bg-amber-100 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400"
                                     : "bg-emerald-100 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400"
                                 )}>
-                                  {msg.callInfo?.status === 'missed' ? (
+                                  {msg.callInfo?.callType === 'video' ? (
+                                    <Video size={20} />
+                                  ) : msg.callInfo?.status === 'missed' ? (
                                     <PhoneMissed size={20} />
                                   ) : msg.callInfo?.status === 'rejected' ? (
                                     <PhoneMissed size={20} />
@@ -1417,11 +1499,17 @@ export function ChatHub({
                                       ? (isMe ? (isMe ? "text-white" : "text-rose-600 dark:text-rose-400") : (isMe ? "text-white" : "text-rose-600 dark:text-rose-400 font-black"))
                                       : (isMe ? "text-white" : "text-slate-900 dark:text-white")
                                   )}>
-                                    {msg.callInfo?.status === 'missed' 
-                                      ? (isMe ? 'Outgoing call (No answer)' : 'Missed voice call')
-                                      : msg.callInfo?.status === 'rejected'
-                                      ? 'Call declined'
-                                      : 'Voice call'}
+                                    {msg.callInfo?.callType === 'video'
+                                      ? (msg.callInfo?.status === 'missed'
+                                          ? (isMe ? 'Outgoing video call (No answer)' : 'Missed video call')
+                                          : msg.callInfo?.status === 'rejected'
+                                          ? 'Video call declined'
+                                          : 'Video call')
+                                      : (msg.callInfo?.status === 'missed' 
+                                          ? (isMe ? 'Outgoing call (No answer)' : 'Missed voice call')
+                                          : msg.callInfo?.status === 'rejected'
+                                          ? 'Call declined'
+                                          : 'Voice call')}
                                   </h4>
                                   <p className={cn(
                                     "text-[10px] font-semibold mt-0.5",
@@ -1431,28 +1519,47 @@ export function ChatHub({
                                       ? (msg.callInfo.duration > 59 
                                           ? `${Math.floor(msg.callInfo.duration / 60)}m ${msg.callInfo.duration % 60}s`
                                           : `${msg.callInfo.duration}s`)
-                                      : (msg.callInfo?.status === 'missed' && !isMe ? 'Tap Call Back to return call' : 'Internet call')}
+                                      : (msg.callInfo?.status === 'missed' && !isMe ? 'Tap below to return call' : 'Internet call')}
                                   </p>
                                 </div>
                               </div>
 
                               {/* Call Back Button */}
                               {activeRoom && (
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleInitiateVoiceCall();
-                                  }}
-                                  className={cn(
-                                    "w-full mt-2.5 py-1.5 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all shadow-sm active:scale-95",
-                                    isMe 
-                                      ? "bg-white/20 hover:bg-white/30 text-white border border-white/20"
-                                      : "bg-emerald-600 hover:bg-emerald-700 text-white"
-                                  )}
-                                >
-                                  <PhoneCall size={13} />
-                                  <span>{msg.callInfo?.status === 'missed' && !isMe ? 'Call Back' : 'Call Again'}</span>
-                                </button>
+                                <div className="flex items-center gap-1.5 mt-2.5">
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleInitiateVoiceCall();
+                                    }}
+                                    className={cn(
+                                      "flex-1 py-1.5 px-2.5 rounded-xl text-xs font-black flex items-center justify-center gap-1 transition-all shadow-sm active:scale-95",
+                                      isMe 
+                                        ? "bg-white/20 hover:bg-white/30 text-white border border-white/20"
+                                        : "bg-emerald-600 hover:bg-emerald-700 text-white"
+                                    )}
+                                    title="Voice Call Back"
+                                  >
+                                    <PhoneCall size={12} />
+                                    <span>Voice</span>
+                                  </button>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleInitiateVideoCall();
+                                    }}
+                                    className={cn(
+                                      "flex-1 py-1.5 px-2.5 rounded-xl text-xs font-black flex items-center justify-center gap-1 transition-all shadow-sm active:scale-95",
+                                      isMe 
+                                        ? "bg-white/20 hover:bg-white/30 text-white border border-white/20"
+                                        : "bg-teal-600 hover:bg-teal-700 text-white"
+                                    )}
+                                    title="Video Call Back"
+                                  >
+                                    <Video size={12} />
+                                    <span>Video</span>
+                                  </button>
+                                </div>
                               )}
                             </div>
                           )}
@@ -1659,15 +1766,11 @@ export function ChatHub({
                 <div className="space-y-3">
                   <div className="bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 rounded-2xl p-3 text-center">
                     <p className="text-xs font-black text-emerald-900 dark:text-emerald-200">
-                      📱 WhatsApp Par OTP Bhej Diya Gaya Hai
+                      📱 WhatsApp OTP Verification
                     </p>
-                    <p className="text-[11px] text-emerald-700 dark:text-emerald-400 mt-0.5">
-                      WhatsApp App khul gaya hoga. Message send karke wahan aaya hua 6-digit code yahan daalein:
+                    <p className="text-[11px] text-emerald-700 dark:text-emerald-400 mt-1 font-medium">
+                      Enter six digit code received from WhatsApp
                     </p>
-                    <div className="mt-2 inline-flex items-center gap-1 px-3 py-1 bg-emerald-600 text-white rounded-full text-xs font-black shadow-xs">
-                      <span>💡 Demo Test OTP:</span>
-                      <span className="font-mono text-sm tracking-widest">{generatedOtp}</span>
-                    </div>
                   </div>
 
                   <div>
@@ -1721,6 +1824,18 @@ export function ChatHub({
                 >
                   {otpStep === 'verify_otp' ? 'Back' : 'Cancel'}
                 </button>
+
+                {phoneModal.isSelf && phoneModal.phone && otpStep === 'input_phone' && (
+                  <button
+                    type="button"
+                    disabled={savingPhone}
+                    onClick={handleDeleteSelfPhone}
+                    className="p-3 bg-rose-50 hover:bg-rose-100 text-rose-600 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 dark:text-rose-400 rounded-2xl text-xs font-black transition-colors flex items-center justify-center gap-1 shrink-0"
+                    title="Delete Number"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                )}
 
                 {otpStep === 'input_phone' ? (
                   <button

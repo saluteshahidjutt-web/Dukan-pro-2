@@ -132,11 +132,18 @@ export class WebRTCService {
   private static instance: WebRTCService;
   private peerConnection: RTCPeerConnection | null = null;
   private localStream: MediaStream | null = null;
+  private remoteStream: MediaStream | null = null;
   private remoteAudioElement: HTMLAudioElement | null = null;
   private audioTone = new CallAudioTone();
   private unsubCallDoc: (() => void) | null = null;
   private unsubCandidates: (() => void) | null = null;
   private currentCallId: string | null = null;
+  private currentCallType: 'voice' | 'video' = 'voice';
+  private facingMode: 'user' | 'environment' = 'user';
+
+  // Stream Callbacks for React Video elements
+  private onLocalStreamCb: ((stream: MediaStream | null) => void) | null = null;
+  private onRemoteStreamCb: ((stream: MediaStream | null) => void) | null = null;
 
   // Call tracking & history logging
   private currentCaller: { uid: string; name: string; phone?: string; photoURL?: string } | null = null;
@@ -145,6 +152,10 @@ export class WebRTCService {
   private connectedStartTime: number | null = null;
   private ringTimeoutTimer: any = null;
   private isCallLogged: boolean = false;
+
+  private isFallbackMedia: boolean = false;
+  private canvasAnimationTimer: any = null;
+  private onPermissionBlockedCb: ((blocked: boolean) => void) | null = null;
 
   public static getInstance(): WebRTCService {
     if (!WebRTCService.instance) {
@@ -162,6 +173,32 @@ export class WebRTCService {
       document.body.appendChild(audio);
       this.remoteAudioElement = audio;
     }
+  }
+
+  public isPermissionBlocked(): boolean {
+    return this.isFallbackMedia;
+  }
+
+  public setPermissionCallback(cb: ((blocked: boolean) => void) | null) {
+    this.onPermissionBlockedCb = cb;
+  }
+
+  public setStreamCallbacks(
+    onLocal: ((stream: MediaStream | null) => void) | null,
+    onRemote: ((stream: MediaStream | null) => void) | null
+  ) {
+    this.onLocalStreamCb = onLocal;
+    this.onRemoteStreamCb = onRemote;
+    if (onLocal && this.localStream) onLocal(this.localStream);
+    if (onRemote && this.remoteStream) onRemote(this.remoteStream);
+  }
+
+  public getLocalStream(): MediaStream | null {
+    return this.localStream;
+  }
+
+  public getRemoteStream(): MediaStream | null {
+    return this.remoteStream;
   }
 
   // 1. Listen for incoming calls on current user ID
@@ -188,16 +225,213 @@ export class WebRTCService {
     });
   }
 
-  // 2. Start an Outgoing Call
+  // Synthetic Fallback MediaStream generator (Audio + Video Canvas)
+  // Ensures calls NEVER fail with "Permission denied" in iframes or restricted environments
+  private createFallbackMediaStream(callType: 'voice' | 'video'): MediaStream {
+    this.isFallbackMedia = true;
+    this.onPermissionBlockedCb?.(true);
+
+    const stream = new MediaStream();
+
+    // 1. Web Audio API synthesized silent audio track
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtx) {
+        const audioCtx = new AudioCtx();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        const dest = audioCtx.createMediaStreamDestination();
+        gain.gain.value = 0.0001; // active minimal carrier
+        osc.connect(gain);
+        gain.connect(dest);
+        osc.start();
+        const audioTrack = dest.stream.getAudioTracks()[0];
+        if (audioTrack) {
+          stream.addTrack(audioTrack);
+        }
+      }
+    } catch (e) {
+      console.warn("Fallback Web Audio track creation error:", e);
+    }
+
+    // 2. Video fallback: dynamic animated canvas with caller profile
+    if (callType === 'video') {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = 640;
+        canvas.height = 480;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          let step = 0;
+          const callerName = this.currentCaller?.name || 'User';
+
+          const drawFrame = () => {
+            step++;
+            const grad = ctx.createLinearGradient(0, 0, 640, 480);
+            grad.addColorStop(0, '#090d16');
+            grad.addColorStop(1, '#1e293b');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, 640, 480);
+
+            // Pulsing avatar circle
+            const r = 55 + Math.sin(step * 0.1) * 5;
+            ctx.beginPath();
+            ctx.arc(320, 195, r, 0, Math.PI * 2);
+            ctx.fillStyle = '#0d9488';
+            ctx.fill();
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = '#2dd4bf';
+            ctx.stroke();
+
+            // Avatar initial
+            ctx.fillStyle = '#ffffff';
+            ctx.font = 'bold 48px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(callerName.charAt(0).toUpperCase() || 'U', 320, 195);
+
+            // User name
+            ctx.font = 'bold 20px sans-serif';
+            ctx.fillStyle = '#f8fafc';
+            ctx.fillText(callerName, 320, 285);
+
+            // Subtitle
+            ctx.font = 'bold 13px sans-serif';
+            ctx.fillStyle = '#2dd4bf';
+            ctx.fillText('Live Video Call (Preview Mode)', 320, 315);
+
+            // Guidance note
+            ctx.font = '11px sans-serif';
+            ctx.fillStyle = '#94a3b8';
+            ctx.fillText('Allow camera/mic in browser URL bar to share live video', 320, 345);
+          };
+
+          drawFrame();
+          if (this.canvasAnimationTimer) clearInterval(this.canvasAnimationTimer);
+          this.canvasAnimationTimer = setInterval(drawFrame, 250);
+
+          if ((canvas as any).captureStream) {
+            const canvasStream = (canvas as any).captureStream(10);
+            const videoTrack = canvasStream.getVideoTracks()[0];
+            if (videoTrack) {
+              stream.addTrack(videoTrack);
+            }
+          }
+        }
+      } catch (e) {
+        console.warn("Fallback canvas video track creation error:", e);
+      }
+    }
+
+    return stream;
+  }
+
+  // Helper to obtain user media with resilient fallback
+  private async acquireMedia(callType: 'voice' | 'video'): Promise<MediaStream> {
+    const isVideo = callType === 'video';
+    this.isFallbackMedia = false;
+    this.onPermissionBlockedCb?.(false);
+
+    if (typeof navigator !== 'undefined' && navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function') {
+      try {
+        if (isVideo) {
+          try {
+            return await navigator.mediaDevices.getUserMedia({
+              audio: true,
+              video: {
+                facingMode: this.facingMode,
+                width: { ideal: 1280 },
+                height: { ideal: 720 }
+              }
+            });
+          } catch (e1) {
+            console.warn("Video with ideal constraints failed, fallback to basic video", e1);
+            try {
+              return await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+            } catch (e2) {
+              console.warn("Camera permission not available, fallback to audio only", e2);
+              return await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            }
+          }
+        } else {
+          return await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        }
+      } catch (err: any) {
+        console.warn("Hardware media access not permitted or denied by browser:", err?.message || err);
+      }
+    } else {
+      console.warn("navigator.mediaDevices.getUserMedia is not supported or restricted in this environment.");
+    }
+
+    // Graceful fallback stream so call always proceeds smoothly
+    return this.createFallbackMediaStream(callType);
+  }
+
+  // Attempt to upgrade fallback stream to live hardware mic/camera during call
+  public async retryHardwareMedia(): Promise<boolean> {
+    if (!navigator.mediaDevices?.getUserMedia) return false;
+    try {
+      const isVideo = this.currentCallType === 'video';
+      const realStream = isVideo 
+        ? await navigator.mediaDevices.getUserMedia({ audio: true, video: true })
+        : await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+
+      if (this.peerConnection) {
+        const senders = this.peerConnection.getSenders();
+        
+        // Replace audio track
+        const newAudioTrack = realStream.getAudioTracks()[0];
+        if (newAudioTrack) {
+          const audioSender = senders.find(s => s.track && s.track.kind === 'audio');
+          if (audioSender) {
+            await audioSender.replaceTrack(newAudioTrack);
+          }
+        }
+
+        // Replace video track if video call
+        if (isVideo) {
+          const newVideoTrack = realStream.getVideoTracks()[0];
+          if (newVideoTrack) {
+            const videoSender = senders.find(s => s.track && s.track.kind === 'video');
+            if (videoSender) {
+              await videoSender.replaceTrack(newVideoTrack);
+            }
+          }
+        }
+      }
+
+      // Stop old tracks and update local stream
+      if (this.localStream) {
+        this.localStream.getTracks().forEach(t => t.stop());
+      }
+      if (this.canvasAnimationTimer) {
+        clearInterval(this.canvasAnimationTimer);
+        this.canvasAnimationTimer = null;
+      }
+
+      this.localStream = realStream;
+      this.isFallbackMedia = false;
+      this.onPermissionBlockedCb?.(false);
+      this.onLocalStreamCb?.(realStream);
+      return true;
+    } catch (e) {
+      console.warn("Retry hardware media failed:", e);
+      return false;
+    }
+  }
+
+  // 2. Start an Outgoing Call (Voice or Video)
   public async startCall(
     receiver: { uid: string; name: string; phone: string; photoURL?: string },
     caller: { uid: string; name: string; phone: string; photoURL?: string },
-    onStatusChange: (status: CallSession['status']) => void
+    onStatusChange: (status: CallSession['status']) => void,
+    callType: 'voice' | 'video' = 'voice'
   ): Promise<string> {
     this.cleanup();
 
     const callId = `call_${generateId()}`;
     this.currentCallId = callId;
+    this.currentCallType = callType;
     this.currentCaller = caller;
     this.currentReceiver = receiver;
     this.currentCallStatus = 'ringing';
@@ -206,9 +440,10 @@ export class WebRTCService {
 
     const callDocRef = doc(db, 'calls', callId);
 
-    // Get Local Microphone
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    // Get Media Stream (Audio or Audio+Video)
+    const stream = await this.acquireMedia(callType);
     this.localStream = stream;
+    this.onLocalStreamCb?.(stream);
 
     // Create RTCPeerConnection
     const pc = new RTCPeerConnection(ICE_SERVERS);
@@ -216,11 +451,15 @@ export class WebRTCService {
 
     stream.getTracks().forEach((track) => pc.addTrack(track, stream));
 
-    // Remote audio track handler
+    // Remote track handler (Audio & Video)
     pc.ontrack = (event) => {
-      if (this.remoteAudioElement && event.streams[0]) {
-        this.remoteAudioElement.srcObject = event.streams[0];
-        this.remoteAudioElement.play().catch(e => console.warn("Remote audio play err", e));
+      if (event.streams[0]) {
+        this.remoteStream = event.streams[0];
+        if (this.remoteAudioElement) {
+          this.remoteAudioElement.srcObject = event.streams[0];
+          this.remoteAudioElement.play().catch(e => console.warn("Remote audio play err", e));
+        }
+        this.onRemoteStreamCb?.(event.streams[0]);
       }
     };
 
@@ -246,6 +485,7 @@ export class WebRTCService {
       receiverName: receiver.name,
       receiverPhone: receiver.phone,
       receiverPhoto: receiver.photoURL || '',
+      callType: callType,
       status: 'ringing',
       offer: {
         type: offerDescription.type,
@@ -321,6 +561,7 @@ export class WebRTCService {
   ) {
     this.cleanup();
     this.currentCallId = callSession.id;
+    this.currentCallType = callSession.callType || 'voice';
     this.currentCaller = {
       uid: callSession.callerId,
       name: callSession.callerName,
@@ -341,9 +582,10 @@ export class WebRTCService {
 
     const callDocRef = doc(db, 'calls', callSession.id);
 
-    // Get Local Microphone
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    // Get Local Stream (matches callType: voice or video)
+    const stream = await this.acquireMedia(this.currentCallType);
     this.localStream = stream;
+    this.onLocalStreamCb?.(stream);
 
     const pc = new RTCPeerConnection(ICE_SERVERS);
     this.peerConnection = pc;
@@ -351,9 +593,13 @@ export class WebRTCService {
     stream.getTracks().forEach((track) => pc.addTrack(track, stream));
 
     pc.ontrack = (event) => {
-      if (this.remoteAudioElement && event.streams[0]) {
-        this.remoteAudioElement.srcObject = event.streams[0];
-        this.remoteAudioElement.play().catch(e => console.warn("Remote audio play err", e));
+      if (event.streams[0]) {
+        this.remoteStream = event.streams[0];
+        if (this.remoteAudioElement) {
+          this.remoteAudioElement.srcObject = event.streams[0];
+          this.remoteAudioElement.play().catch(e => console.warn("Remote audio play err", e));
+        }
+        this.onRemoteStreamCb?.(event.streams[0]);
       }
     };
 
@@ -467,6 +713,7 @@ export class WebRTCService {
     const caller = this.currentCaller;
     const receiver = this.currentReceiver;
     const callId = this.currentCallId || undefined;
+    const callType = this.currentCallType || 'voice';
 
     let finalLogStatus: 'missed' | 'completed' | 'rejected' | 'busy' = 'missed';
     let duration = 0;
@@ -482,7 +729,7 @@ export class WebRTCService {
       finalLogStatus = 'missed';
     }
 
-    FirestoreService.sendCallLogMessage(caller, receiver, finalLogStatus, duration, callId).catch(e => {
+    FirestoreService.sendCallLogMessage(caller, receiver, finalLogStatus, duration, callId, callType).catch(e => {
       console.warn("Call log message recording warning:", e);
     });
   }
@@ -493,6 +740,58 @@ export class WebRTCService {
       this.localStream.getAudioTracks().forEach(track => {
         track.enabled = !muted;
       });
+    }
+  }
+
+  // Toggle Camera / Video on/off
+  public toggleVideo(enabled: boolean): boolean {
+    if (this.localStream) {
+      this.localStream.getVideoTracks().forEach(track => {
+        track.enabled = enabled;
+      });
+      return enabled;
+    }
+    return false;
+  }
+
+  // Switch between Front & Rear Camera on Mobile Devices
+  public async switchCamera(): Promise<boolean> {
+    if (!this.peerConnection || !this.localStream) return false;
+    const videoTrack = this.localStream.getVideoTracks()[0];
+    if (!videoTrack) return false;
+
+    const newFacingMode = this.facingMode === 'user' ? 'environment' : 'user';
+
+    try {
+      const newStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: newFacingMode,
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        }
+      });
+
+      const newVideoTrack = newStream.getVideoTracks()[0];
+      if (!newVideoTrack) return false;
+
+      // Replace track on RTCPeerConnection sender
+      const senders = this.peerConnection.getSenders();
+      const videoSender = senders.find(s => s.track && s.track.kind === 'video');
+      if (videoSender) {
+        await videoSender.replaceTrack(newVideoTrack);
+      }
+
+      // Stop old video track
+      videoTrack.stop();
+      this.localStream.removeTrack(videoTrack);
+      this.localStream.addTrack(newVideoTrack);
+
+      this.facingMode = newFacingMode;
+      this.onLocalStreamCb?.(this.localStream);
+      return true;
+    } catch (e) {
+      console.warn("Switch camera error:", e);
+      return false;
     }
   }
 
@@ -525,6 +824,9 @@ export class WebRTCService {
       this.localStream.getTracks().forEach(track => track.stop());
       this.localStream = null;
     }
+    this.remoteStream = null;
+    this.onLocalStreamCb?.(null);
+    this.onRemoteStreamCb?.(null);
 
     if (this.peerConnection) {
       this.peerConnection.close();
@@ -534,6 +836,13 @@ export class WebRTCService {
     if (this.remoteAudioElement) {
       this.remoteAudioElement.srcObject = null;
     }
+
+    if (this.canvasAnimationTimer) {
+      clearInterval(this.canvasAnimationTimer);
+      this.canvasAnimationTimer = null;
+    }
+    this.isFallbackMedia = false;
+    this.onPermissionBlockedCb?.(false);
 
     this.currentCallId = null;
     this.connectedStartTime = null;
