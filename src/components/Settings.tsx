@@ -91,18 +91,16 @@ export function Settings({ settings, setSettings }: SettingsProps) {
     let formattedForWa = digits;
     if (formattedForWa.startsWith('03')) {
       formattedForWa = '92' + formattedForWa.slice(1);
+    } else if (formattedForWa.startsWith('3')) {
+      formattedForWa = '92' + formattedForWa;
     }
 
     const text = encodeURIComponent(`Assalam-o-Alaikum! My Dukan Pro Verification Code is: ${code} for number: ${settings.phone}. Please verify my account.`);
-    
-    // Direct WhatsApp protocol link without text parameter opens WhatsApp chat directly without iOS preview sheet
-    const directWaProtocolNoSheet = `whatsapp://send?phone=${formattedForWa}`;
     const webWaUrl = `https://wa.me/${formattedForWa}?text=${text}`;
 
     const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
     if (isMobile) {
-      // Deep link opens WhatsApp app directly with zero preview sheet
-      window.location.href = directWaProtocolNoSheet;
+      window.location.href = webWaUrl;
     } else {
       window.open(webWaUrl, '_blank');
     }
@@ -870,7 +868,7 @@ export function Settings({ settings, setSettings }: SettingsProps) {
                         📱 WhatsApp OTP Verification
                       </p>
                       <p className="text-[11px] text-emerald-800 dark:text-emerald-300 mt-1 font-medium">
-                        Enter six digit code received from WhatsApp
+                        Code WhatsApp par bheja gaya hai: <span className="font-mono font-black text-xs text-emerald-950 dark:text-emerald-200 bg-white dark:bg-slate-800 px-2 py-0.5 rounded shadow-sm border border-emerald-300 dark:border-emerald-700">{generatedSettingsOtp}</span>
                       </p>
                     </div>
 

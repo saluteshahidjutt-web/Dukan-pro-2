@@ -648,15 +648,16 @@ export function ChatHub({
     let formattedForWa = digits;
     if (formattedForWa.startsWith('03')) {
       formattedForWa = '92' + formattedForWa.slice(1);
+    } else if (formattedForWa.startsWith('3')) {
+      formattedForWa = '92' + formattedForWa;
     }
 
     const text = encodeURIComponent(`Assalam-o-Alaikum! My Dukan Pro Verification Code is: ${code} for number: ${phoneModal.phone}. Please verify my account.`);
-    const directWaProtocolNoSheet = `whatsapp://send?phone=${formattedForWa}`;
     const waUrl = `https://wa.me/${formattedForWa}?text=${text}`;
 
     const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
     if (isMobile) {
-      window.location.href = directWaProtocolNoSheet;
+      window.location.href = waUrl;
     } else {
       window.open(waUrl, '_blank');
     }
@@ -764,7 +765,7 @@ export function ChatHub({
           activeRoom ? "hidden md:flex" : "flex"
         )}>
           {/* Header with 3 Tabs: Archived, Chats, and Calls */}
-          <div className="p-3 bg-emerald-700 dark:bg-slate-800 text-white flex items-center justify-between shadow-md transition-colors gap-2">
+          <div className="p-3 bg-emerald-700 dark:bg-slate-800 text-white flex items-center justify-between shadow-md transition-colors gap-2 shrink-0">
             <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 min-w-0">
               {/* 1. Archived Tab */}
               <button
@@ -1330,7 +1331,7 @@ export function ChatHub({
           ) : (
             <>
               {/* Active Room Top Bar */}
-              <div className="p-3.5 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between shadow-sm z-10">
+              <div className="p-3.5 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between shadow-sm z-10 shrink-0">
                 <div className="flex items-center gap-3">
                   <button 
                     onClick={() => setActiveRoom(null)} 
@@ -1780,8 +1781,8 @@ export function ChatHub({
                     <p className="text-xs font-black text-emerald-900 dark:text-emerald-200">
                       📱 WhatsApp OTP Verification
                     </p>
-                    <p className="text-[11px] text-emerald-700 dark:text-emerald-400 mt-1 font-medium">
-                      Enter six digit code received from WhatsApp
+                    <p className="text-[11px] text-emerald-800 dark:text-emerald-300 mt-1 font-medium">
+                      Code WhatsApp par bheja gaya hai: <span className="font-mono font-black text-xs text-emerald-950 dark:text-emerald-200 bg-white dark:bg-slate-800 px-2 py-0.5 rounded shadow-sm border border-emerald-300 dark:border-emerald-700">{generatedOtp}</span>
                     </p>
                   </div>
 

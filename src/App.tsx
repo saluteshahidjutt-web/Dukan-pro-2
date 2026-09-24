@@ -723,10 +723,7 @@ function MainApp() {
   };
 
   return (
-    <div 
-      className="h-[100dvh] max-h-[100dvh] bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 flex flex-col md:flex-row font-sans transition-colors duration-300 overflow-hidden"
-      style={{ height: 'var(--app-height, 100dvh)', maxHeight: 'var(--app-height, 100dvh)' }}
-    >
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 flex flex-col md:flex-row font-sans transition-colors duration-300">
       {/* Offline Status Pill */}
       {!isOnline && (
         <div className="fixed top-2 left-1/2 -translate-x-1/2 z-[1000] px-4 py-1.5 bg-rose-600 text-white rounded-full text-[10px] font-black uppercase tracking-widest shadow-lg flex items-center gap-2 animate-pulse">
@@ -823,10 +820,7 @@ function MainApp() {
 
 
       {/* Main Content Area */}
-      <div 
-        className="flex-1 flex flex-col w-full bg-slate-50 dark:bg-slate-900 relative overflow-hidden"
-        style={{ height: 'var(--app-height, 100dvh)', maxHeight: 'var(--app-height, 100dvh)' }}
-      >
+      <div className="flex-1 flex flex-col w-full bg-slate-50 dark:bg-slate-900 relative min-h-screen md:min-h-0">
         {/* Top Header - Responsive */}
         <header className="h-16 md:h-20 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between px-4 md:px-8 shrink-0 z-20 sticky top-0 md:bg-white/80 dark:md:bg-slate-800/80 md:backdrop-blur-md">
           <div className="flex items-center gap-3">
