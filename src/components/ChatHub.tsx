@@ -129,9 +129,21 @@ export function ChatHub({
   const [generatedOtp, setGeneratedOtp] = useState('');
   const [enteredOtp, setEnteredOtp] = useState('');
 
-  // Auto-scroll anchor
+  // Auto-scroll anchor & container
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
   const textInputRef = useRef<HTMLInputElement | null>(null);
+
+  const scrollToBottom = (behavior: ScrollBehavior = 'smooth') => {
+    if (messagesContainerRef.current) {
+      messagesContainerRef.current.scrollTo({
+        top: messagesContainerRef.current.scrollHeight,
+        behavior
+      });
+    } else {
+      messagesEndRef.current?.scrollIntoView({ behavior, block: 'nearest' });
+    }
+  };
 
   // Auto-focus input when a chat room is opened (opens mobile keyboard)
   useEffect(() => {
@@ -293,7 +305,7 @@ export function ChatHub({
     const unsubscribe = FirestoreService.subscribeToMessages(activeRoom.id, (msgs) => {
       setMessages(msgs);
       setTimeout(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        scrollToBottom('smooth');
       }, 100);
     });
     return () => unsubscribe();
@@ -1403,7 +1415,7 @@ export function ChatHub({
               </div>
 
               {/* Messages Body (Instant Realtime Sync across Mobiles & PC) */}
-              <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
+              <div ref={messagesContainerRef} className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
                 {messages.length === 0 ? (
                   <div className="text-center py-12">
                     <span className="text-[11px] bg-slate-200/70 dark:bg-slate-800/80 text-slate-500 dark:text-slate-400 px-3.5 py-1.5 rounded-full font-medium shadow-sm inline-flex items-center gap-1.5">
@@ -1587,7 +1599,7 @@ export function ChatHub({
               </div>
 
               {/* Bottom Input Area */}
-              <div className="shrink-0 z-20 p-2.5 md:p-3 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 shadow-md">
+              <div className="shrink-0 z-20 px-2.5 pt-2 pb-2 md:p-3 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 shadow-md sticky bottom-0 m-0">
                 {isRecording ? (
                   /* Live Recording View */
                   <div className="flex items-center justify-between bg-rose-50 dark:bg-rose-950/40 p-2.5 rounded-2xl border border-rose-200 dark:border-rose-900 animate-pulse">
@@ -1647,8 +1659,8 @@ export function ChatHub({
                       onChange={(e) => setTextInput(e.target.value)}
                       onFocus={() => {
                         setTimeout(() => {
-                          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-                        }, 250);
+                          scrollToBottom('smooth');
+                        }, 120);
                       }}
                       className="flex-1 bg-slate-100 dark:bg-slate-700 text-slate-900 dark:text-white px-4 py-3 rounded-2xl text-xs md:text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 border border-slate-200 dark:border-slate-600"
                     />
