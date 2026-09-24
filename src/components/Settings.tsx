@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import Papa from 'papaparse';
 import { ShopSettings } from '../types';
-import { Store, Phone, Languages, RefreshCcw, Lock, Shield, Moon, Sun, Image as ImageIcon, FileText, Cloud, LogIn, LogOut, Upload, Mail, ScanFace, Fingerprint, MessageSquare, Trash2, CheckCircle2 } from 'lucide-react';
+import { Store, Phone, Languages, RefreshCcw, Lock, Shield, Moon, Sun, Image as ImageIcon, FileText, Cloud, LogIn, LogOut, Upload, Mail, ScanFace, Fingerprint, MessageSquare, Trash2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { ConfirmModal } from './ConfirmModal';
 import { PINScreen } from './PINScreen';
 import { cn } from '../lib/utils';
@@ -46,7 +46,7 @@ export function Settings({ settings, setSettings }: SettingsProps) {
           setSettings(prev => ({
             ...prev,
             phone: profile.phone,
-            phoneVerified: profile.phoneVerified !== false
+            phoneVerified: profile.phoneVerified === true
           }));
         }
       } catch (e) {
@@ -56,7 +56,7 @@ export function Settings({ settings, setSettings }: SettingsProps) {
     checkUserPhoneVerified();
   }, []);
 
-  const handleSavePhoneAndTriggerWhatsAppOtp = async () => {
+  const handleSavePhoneAndTriggerWhatsAppOtp = async (allowTransfer: boolean = false) => {
     const digits = (settings.phone || '').replace(/[^0-9]/g, '');
     if (digits.length < 10) {
       setPhoneStatusIsError(true);
@@ -64,19 +64,21 @@ export function Settings({ settings, setSettings }: SettingsProps) {
       return;
     }
 
-    // Strict 1-to-1 account check: Verify if phone number is already registered to another account/email
+    // Check if phone number is already registered to another account/email (only if not doing OTP transfer)
     setIsSavingSettingsPhone(true);
-    try {
-      const availability = await FirestoreService.checkPhoneAvailability(settings.phone || '');
-      if (!availability.available) {
-        setPhoneStatusIsError(true);
-        const otherInfo = availability.existingUser?.email ? ` (${availability.existingUser.email})` : '';
-        setPhoneStatusMsg(`❌ This phone number is already registered with another account${otherInfo}. One number can only be connected to one user account / email.`);
-        setIsSavingSettingsPhone(false);
-        return;
+    if (!allowTransfer) {
+      try {
+        const availability = await FirestoreService.checkPhoneAvailability(settings.phone || '');
+        if (!availability.available) {
+          setPhoneStatusIsError(true);
+          const otherInfo = availability.existingUser?.email ? ` (${availability.existingUser.email})` : '';
+          setPhoneStatusMsg(`❌ This phone number is already registered with another account${otherInfo}. One number can only be connected to one user account / email.`);
+          setIsSavingSettingsPhone(false);
+          return;
+        }
+      } catch (e) {
+        console.warn("Phone availability check error:", e);
       }
-    } catch (e) {
-      console.warn("Phone availability check error:", e);
     }
     setIsSavingSettingsPhone(false);
 
@@ -116,8 +118,8 @@ export function Settings({ settings, setSettings }: SettingsProps) {
     setIsSavingSettingsPhone(true);
     setPhoneStatusIsError(false);
     try {
-      // 1. Update user profile (enforces uniqueness check and marks phoneVerified = true)
-      await FirestoreService.updateUserProfilePhone(settings.phone, settings.name);
+      // 1. Update user profile (with allowTransfer = true since valid WhatsApp OTP was confirmed)
+      await FirestoreService.updateUserProfilePhone(settings.phone, settings.name, true);
       
       // 2. Save settings with phoneVerified: true
       const updated: ShopSettings = {
@@ -845,21 +847,64 @@ export function Settings({ settings, setSettings }: SettingsProps) {
                     type="tel" 
                     placeholder="03001234567"
                     className="flex-1 bg-slate-50 dark:bg-slate-700 border-none rounded-xl py-3 px-4 text-sm font-bold dark:text-white focus:ring-2 focus:ring-emerald-500"
-                    value={settings.phone}
+                    value={settings.phone || ''}
                     onChange={(e) => {
                       setSettings({...settings, phone: e.target.value});
                       setPhoneStatusMsg('');
                       setPhoneStatusIsError(false);
                     }}
                   />
-                  <button
-                    type="button"
-                    onClick={handleSavePhoneAndTriggerWhatsAppOtp}
-                    className="shrink-0 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white px-4 py-3 rounded-xl text-xs font-black shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-1.5 transition-all"
-                  >
-                    <span>📱 Save Number & Verify via WhatsApp</span>
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleSavePhoneAndTriggerWhatsAppOtp(false)}
+                      className="flex-1 sm:flex-none bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white px-4 py-3 rounded-xl text-xs font-black shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-1.5 transition-all"
+                    >
+                      <span>📱 Save Number & Verify via WhatsApp</span>
+                    </button>
+                    {settings.phone && (
+                      <button
+                        type="button"
+                        onClick={() => setIsConfirmingDeletePhone(true)}
+                        className="bg-rose-50 hover:bg-rose-100 active:scale-95 text-rose-600 dark:bg-rose-950/60 dark:hover:bg-rose-900/60 dark:text-rose-400 border border-rose-200 dark:border-rose-800 font-black text-xs px-3.5 py-3 rounded-xl flex items-center justify-center gap-1.5 transition-all shrink-0"
+                        title="Delete this phone number"
+                      >
+                        <Trash2 size={15} />
+                        <span>Delete Number</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
+
+                {isConfirmingDeletePhone && (
+                  <div className="p-3 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 rounded-xl space-y-2 animate-in fade-in">
+                    <p className="text-xs font-black text-rose-700 dark:text-rose-300">
+                      ⚠️ Kya aap waqai is account se phone number delete karna chahte hain?
+                    </p>
+                    <p className="text-[11px] text-rose-600 dark:text-rose-400 font-medium">
+                      Is se ye number is account aur profile se mukammal remove ho kar free ho jaye ga.
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={isDeletingPhone}
+                        onClick={handleDeletePhoneNumber}
+                        className="bg-rose-600 hover:bg-rose-700 active:scale-95 text-white font-black text-xs px-4 py-2 rounded-xl flex items-center justify-center gap-1.5 shadow transition-all"
+                      >
+                        <Trash2 size={13} />
+                        <span>{isDeletingPhone ? 'Deleting...' : 'Yes, Confirm Delete'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isDeletingPhone}
+                        onClick={() => setIsConfirmingDeletePhone(false)}
+                        className="bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 font-bold text-xs px-3.5 py-2 rounded-xl transition-all"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {settingsOtpStep === 'verify_otp' && (
                   <div className="mt-3 p-4 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 rounded-2xl space-y-3 animate-in fade-in">
@@ -884,14 +929,26 @@ export function Settings({ settings, setSettings }: SettingsProps) {
                         }}
                         className="w-full text-center font-mono tracking-widest text-base px-3 py-2.5 bg-white dark:bg-slate-800 border border-emerald-300 dark:border-emerald-700 rounded-xl font-bold dark:text-white focus:ring-2 focus:ring-emerald-500"
                       />
-                      <button
-                        type="button"
-                        disabled={isSavingSettingsPhone}
-                        onClick={handleVerifySettingsOtpAndSave}
-                        className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-xl text-xs font-black shadow transition-all"
-                      >
-                        {isSavingSettingsPhone ? 'Saving...' : 'Verify & Save'}
-                      </button>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSettingsOtpStep('none');
+                            setPhoneStatusMsg('');
+                          }}
+                          className="flex-1 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 text-slate-700 dark:text-slate-300 py-2.5 rounded-xl text-xs font-bold transition-all"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isSavingSettingsPhone}
+                          onClick={handleVerifySettingsOtpAndSave}
+                          className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-xl text-xs font-black shadow transition-all"
+                        >
+                          {isSavingSettingsPhone ? 'Saving...' : 'Verify & Save'}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -899,9 +956,42 @@ export function Settings({ settings, setSettings }: SettingsProps) {
             )}
 
             {phoneStatusMsg && (
-              <p className={cn("text-xs font-bold mt-2 flex items-center gap-1", phoneStatusIsError ? "text-rose-500" : "text-emerald-600 dark:text-emerald-400")}>
-                {phoneStatusMsg}
-              </p>
+              <div className="mt-2.5">
+                {phoneStatusIsError ? (
+                  <div className="p-3 bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-900 rounded-2xl space-y-2.5 animate-in fade-in">
+                    <div className="flex items-start gap-2">
+                      <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+                      <p className="text-xs font-bold text-rose-700 dark:text-rose-300">
+                        {phoneStatusMsg}
+                      </p>
+                    </div>
+                    {phoneStatusMsg.includes('already registered') && (
+                      <div className="pt-1 flex flex-col sm:flex-row gap-2">
+                        <button
+                          type="button"
+                          disabled={isDeletingPhone}
+                          onClick={handleDeletePhoneNumber}
+                          className="flex-1 bg-rose-100 hover:bg-rose-200 active:scale-95 text-rose-800 dark:bg-rose-900/60 dark:hover:bg-rose-900 dark:text-rose-200 font-black text-xs py-2.5 px-3 rounded-xl flex items-center justify-center gap-1.5 transition-all border border-rose-300 dark:border-rose-800"
+                        >
+                          <Trash2 size={13} />
+                          <span>Delete / Clear from this Account</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleSavePhoneAndTriggerWhatsAppOtp(true)}
+                          className="flex-1 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black text-xs py-2.5 px-3 rounded-xl flex items-center justify-center gap-1.5 shadow transition-all"
+                        >
+                          <span>📲 Verify via WhatsApp & Transfer</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-xs font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
+                    <CheckCircle2 size={14} /> {phoneStatusMsg}
+                  </p>
+                )}
+              </div>
             )}
           </div>
 

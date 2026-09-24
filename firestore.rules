@@ -73,11 +73,11 @@ service cloud.firestore {
     }
 
     function isValidUserProfile(data) {
-      return data.keys().hasAll(['id', 'uid', 'name', 'phone']) &&
+      return data.keys().hasAll(['id', 'uid', 'name']) &&
              data.keys().size() <= 15 &&
              data.uid == request.auth.uid &&
              data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
-             data.phone is string && data.phone.size() > 0 && data.phone.size() <= 30;
+             (!('phone' in data) || (data.phone is string && data.phone.size() <= 30));
     }
 
     function isValidChatRoom(data) {
@@ -149,7 +149,8 @@ service cloud.firestore {
     match /users/{userId} {
       allow get: if isSignedIn();
       allow list: if isSignedIn();
-      allow write: if isSignedIn() && userId == request.auth.uid && isValidUserProfile(incoming());
+      allow create, update: if isSignedIn() && userId == request.auth.uid && isValidUserProfile(incoming());
+      allow delete: if isSignedIn() && userId == request.auth.uid;
     }
 
     // Chat Rooms between participants

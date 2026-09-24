@@ -432,10 +432,11 @@ function MainApp() {
       if (s) {
         setShopSettings(s);
         setNeedsOnboarding(false);
-        if (s.phone) {
+        if (s.phone && s.phoneVerified) {
           FirestoreService.syncUserProfile({
             name: s.name || user?.displayName || 'Dukaan User',
             phone: s.phone,
+            phoneVerified: true,
             photoURL: s.logoUrl || s.photoURL || user?.photoURL || ''
           });
         }

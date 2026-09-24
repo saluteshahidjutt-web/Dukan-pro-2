@@ -171,11 +171,12 @@ export function ChatHub({
       const userPhoto = settings.logoUrl || settings.photoURL || auth.currentUser.photoURL || '';
       FirestoreService.syncUserProfile({
         name: settings.name || auth.currentUser.displayName || 'Dukaan User',
-        phone: settings.phone || '',
+        phone: settings.phoneVerified ? (settings.phone || '') : '',
+        phoneVerified: !!settings.phoneVerified,
         photoURL: userPhoto
       });
     }
-  }, [settings.name, settings.phone, settings.logoUrl, settings.photoURL]);
+  }, [settings.name, settings.phone, settings.phoneVerified, settings.logoUrl, settings.photoURL]);
 
   // 2. Subscribe to active chat rooms (Real-time synchronization across all logged-in devices/mobiles/PC)
   useEffect(() => {
@@ -616,25 +617,27 @@ export function ChatHub({
     setPhoneError('');
   };
 
-  const handleSendWhatsAppOtp = async () => {
+  const handleSendWhatsAppOtp = async (allowTransfer: boolean = false) => {
     const digits = phoneModal.phone.replace(/[^0-9]/g, '');
     if (digits.length < 10) {
       setPhoneError("Phone number kam az kam 10 ya 11 digits ka hona chahiye (e.g. 03001234567)");
       return;
     }
 
-    // Strict 1-to-1 account check: Verify if phone number is already registered to another account/email
+    // Check phone availability unless user explicitly requested OTP transfer
     setSavingPhone(true);
-    try {
-      const availability = await FirestoreService.checkPhoneAvailability(phoneModal.phone);
-      if (!availability.available) {
-        const otherInfo = availability.existingUser?.email ? ` (${availability.existingUser.email})` : '';
-        setPhoneError(`❌ This phone number is already registered with another account${otherInfo}. One number can only be connected to one user account / email.`);
-        setSavingPhone(false);
-        return;
+    if (!allowTransfer) {
+      try {
+        const availability = await FirestoreService.checkPhoneAvailability(phoneModal.phone);
+        if (!availability.available) {
+          const otherInfo = availability.existingUser?.email ? ` (${availability.existingUser.email})` : '';
+          setPhoneError(`❌ This phone number is already registered with another account${otherInfo}. One number can only be connected to one user account / email.`);
+          setSavingPhone(false);
+          return;
+        }
+      } catch (e) {
+        console.warn("Check availability notice:", e);
       }
-    } catch (e) {
-      console.warn("Check availability notice:", e);
     }
     setSavingPhone(false);
 
@@ -678,7 +681,8 @@ export function ChatHub({
 
     setSavingPhone(true);
     try {
-      await FirestoreService.updateUserProfilePhone(phoneModal.phone, settings.name);
+      // User entered valid WhatsApp OTP, allowTransfer = true
+      await FirestoreService.updateUserProfilePhone(phoneModal.phone, settings.name, true);
       
       const wasCallTrigger = phoneModal.isCallTrigger;
 
@@ -1767,9 +1771,32 @@ export function ChatHub({
                     )}
                   </div>
                   {phoneError && (
-                    <p className="text-xs text-rose-500 font-bold mt-1.5 flex items-center gap-1">
-                      <AlertCircle size={13} /> {phoneError}
-                    </p>
+                    <div className="space-y-2 mt-2">
+                      <div className="p-2.5 bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900 rounded-xl text-xs text-rose-600 dark:text-rose-400 font-bold flex items-start gap-1.5">
+                        <AlertCircle size={15} className="shrink-0 mt-0.5" />
+                        <span>{phoneError}</span>
+                      </div>
+                      {phoneError.includes('already registered') && (
+                        <div className="flex flex-col sm:flex-row gap-1.5 pt-1">
+                          <button
+                            type="button"
+                            disabled={savingPhone}
+                            onClick={handleDeleteSelfPhone}
+                            className="flex-1 py-2 px-3 bg-rose-100 hover:bg-rose-200 text-rose-800 dark:bg-rose-900/60 dark:hover:bg-rose-900 dark:text-rose-200 rounded-xl text-xs font-black flex items-center justify-center gap-1 transition-all border border-rose-300 dark:border-rose-800"
+                          >
+                            <Trash2 size={13} />
+                            <span>Delete / Clear Number</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleSendWhatsAppOtp(true)}
+                            className="flex-1 py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1 transition-all shadow"
+                          >
+                            <span>📲 Verify via WhatsApp & Transfer</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   )}
                   <p className="text-[10px] text-slate-400 mt-1.5">
                     💡 Is number ko verify karne ke liye 1-click WhatsApp OTP sent kiya jayega.
@@ -1813,7 +1840,7 @@ export function ChatHub({
                   <div className="text-center pt-1">
                     <button
                       type="button"
-                      onClick={handleSendWhatsAppOtp}
+                      onClick={() => handleSendWhatsAppOtp(false)}
                       className="text-[11px] text-emerald-600 dark:text-emerald-400 font-bold underline hover:text-emerald-700"
                     >
                       🔁 Dobara WhatsApp Code Bhejein
@@ -1843,17 +1870,18 @@ export function ChatHub({
                     type="button"
                     disabled={savingPhone}
                     onClick={handleDeleteSelfPhone}
-                    className="p-3 bg-rose-50 hover:bg-rose-100 text-rose-600 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 dark:text-rose-400 rounded-2xl text-xs font-black transition-colors flex items-center justify-center gap-1 shrink-0"
+                    className="py-3 px-3.5 bg-rose-50 hover:bg-rose-100 text-rose-600 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 dark:text-rose-400 rounded-2xl text-xs font-black transition-colors flex items-center justify-center gap-1.5 shrink-0 border border-rose-200 dark:border-rose-800"
                     title="Delete Number"
                   >
-                    <Trash2 size={16} />
+                    <Trash2 size={15} />
+                    <span>Delete Number</span>
                   </button>
                 )}
 
                 {otpStep === 'input_phone' ? (
                   <button
                     type="button"
-                    onClick={handleSendWhatsAppOtp}
+                    onClick={() => handleSendWhatsAppOtp(false)}
                     className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-2xl text-xs font-black shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-1.5 transition-all"
                   >
                     <span>🟢 Verify via WhatsApp</span>

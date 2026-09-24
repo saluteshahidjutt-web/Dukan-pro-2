@@ -110,7 +110,7 @@
         "status": { "type": "string" },
         "updatedAt": { "type": "string" }
       },
-      "required": ["id", "uid", "name", "phone"]
+      "required": ["id", "uid", "name"]
     },
     "ChatRoom": {
       "title": "Chat Room",

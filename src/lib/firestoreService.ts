@@ -81,7 +81,7 @@ export const normalizePhoneNumber = (phone: string): { standard: string; without
 
 export const FirestoreService = {
   // Check if a phone number is already registered by another account / user email
-  checkPhoneAvailability: async (phoneInput: string): Promise<{ available: boolean; existingUser?: { uid: string; email?: string; name?: string } }> => {
+  checkPhoneAvailability: async (phoneInput: string): Promise<{ available: boolean; existingUser?: { uid: string; email?: string; name?: string; phoneVerified?: boolean } }> => {
     const currentUid = auth.currentUser?.uid;
     const cleanDigits = phoneInput.replace(/[^0-9]/g, '');
     if (!cleanDigits || cleanDigits.length < 9) {
@@ -97,17 +97,22 @@ export const FirestoreService = {
         const q = query(usersRef, where('phone', '==', variant), limit(5));
         const snap = await getDocs(q);
         for (const docSnap of snap.docs) {
-          const data = docSnap.data() as UserProfile & { email?: string };
-          // If another user (different UID) is using this phone number
+          const data = docSnap.data() as UserProfile & { email?: string; phoneVerified?: boolean };
+          // If another user (different UID) has this phone number
           if (docSnap.id !== currentUid && data.uid !== currentUid) {
-            return {
-              available: false,
-              existingUser: {
-                uid: data.uid || docSnap.id,
-                email: data.email,
-                name: data.name
-              }
-            };
+            // CRITICAL: Only mark unavailable if that other user has VERIFIED this number (phoneVerified === true).
+            // Ghost syncs or unverified entries from guest mode or drafts should NEVER block another user!
+            if (data.phoneVerified === true) {
+              return {
+                available: false,
+                existingUser: {
+                  uid: data.uid || docSnap.id,
+                  email: data.email,
+                  name: data.name,
+                  phoneVerified: true
+                }
+              };
+            }
           }
         }
       }
@@ -459,10 +464,11 @@ export const FirestoreService = {
     if (!userId) return;
     try {
       await setDoc(doc(db, 'settings', userId), { ...settings, ownerId: userId });
-      if (settings.phone) {
+      if (settings.phone && settings.phoneVerified) {
         await FirestoreService.syncUserProfile({
           name: settings.name || auth.currentUser?.displayName || 'User',
           phone: settings.phone,
+          phoneVerified: true,
           photoURL: settings.logoUrl || settings.photoURL || auth.currentUser?.photoURL || ''
         });
       }
@@ -730,28 +736,41 @@ export const FirestoreService = {
   },
 
   // --- User Profiles for Chat Search ---
-  syncUserProfile: async (profile: { name: string; phone: string; photoURL?: string }) => {
+  syncUserProfile: async (profile: { name: string; phone?: string; phoneVerified?: boolean; photoURL?: string }) => {
     const user = auth.currentUser;
     if (!user) return;
     try {
-      const { standard } = normalizePhoneNumber(profile.phone);
-      const userDoc: UserProfile = {
+      const cleanDigits = (profile.phone || '').replace(/[^0-9]/g, '');
+      const isVerified = profile.phoneVerified === true && cleanDigits.length >= 9;
+      const { standard } = cleanDigits.length >= 9 ? normalizePhoneNumber(profile.phone || '') : { standard: '' };
+
+      const userDoc: any = {
         id: user.uid,
         uid: user.uid,
-        name: profile.name,
-        phone: standard,
+        name: profile.name || user.displayName || 'User',
         email: user.email || '',
         photoURL: profile.photoURL || user.photoURL || '',
         status: 'Hey there! I am using Dukaan Pro Chat',
         updatedAt: new Date().toISOString()
       };
+
+      // CRITICAL: Only claim phone in public users collection if verified!
+      // If profile explicitly cleared phone, clear it. If unverified, do not publish phone.
+      if (isVerified) {
+        userDoc.phone = standard;
+        userDoc.phoneVerified = true;
+      } else if (profile.phone === '') {
+        userDoc.phone = '';
+        userDoc.phoneVerified = false;
+      }
+
       await setDoc(doc(db, 'users', user.uid), userDoc, { merge: true });
     } catch (e) {
       console.warn("UserProfile sync skipped or offline:", e);
     }
   },
 
-  updateUserProfilePhone: async (phone: string, name?: string) => {
+  updateUserProfilePhone: async (phone: string, name?: string, allowTransfer: boolean = false) => {
     const user = auth.currentUser;
     if (!user) return false;
     const { standard } = normalizePhoneNumber(phone);
@@ -759,13 +778,37 @@ export const FirestoreService = {
 
     // 1. Strict 1-to-1 account enforcement: Verify this number is NOT claimed by another email / account
     const availability = await FirestoreService.checkPhoneAvailability(standard);
-    if (!availability.available) {
+    if (!availability.available && !allowTransfer) {
       const otherInfo = availability.existingUser?.email ? ` (${availability.existingUser.email})` : '';
       throw new Error(`This phone number is already registered with another account${otherInfo}. One number can only be connected to one user account / email.`);
     }
 
     try {
-      // 2. Set phone and email on current user's profile with phoneVerified = true
+      // 2. If allowTransfer is enabled (user completed WhatsApp OTP verification), release from any old doc
+      if (allowTransfer) {
+        try {
+          const usersRef = collection(db, 'users');
+          const { standard, withoutZero, withCountry, canonical } = normalizePhoneNumber(phone);
+          const variants = Array.from(new Set([standard, withoutZero, withCountry, canonical])).filter(v => v.length >= 9);
+          for (const variant of variants) {
+            const q = query(usersRef, where('phone', '==', variant), limit(5));
+            const snap = await getDocs(q);
+            for (const docSnap of snap.docs) {
+              if (docSnap.id !== user.uid) {
+                await setDoc(doc(db, 'users', docSnap.id), {
+                  phone: '',
+                  phoneVerified: false,
+                  updatedAt: new Date().toISOString()
+                }, { merge: true }).catch(() => {});
+              }
+            }
+          }
+        } catch (cleanErr) {
+          console.warn("Transfer clean notice:", cleanErr);
+        }
+      }
+
+      // 3. Set phone and email on current user's profile with phoneVerified = true
       await setDoc(doc(db, 'users', user.uid), {
         id: user.uid,
         uid: user.uid,
@@ -795,6 +838,7 @@ export const FirestoreService = {
           ...(name ? { name } : {})
         });
       }
+      window.dispatchEvent(new Event('dukan_storage_update'));
       return true;
     } catch (e) {
       console.warn("Update user profile phone err:", e);
@@ -843,6 +887,7 @@ export const FirestoreService = {
           phoneVerified: false
         });
       }
+      window.dispatchEvent(new Event('dukan_storage_update'));
       return true;
     } catch (e) {
       console.warn("Delete user profile phone error:", e);
