@@ -121,6 +121,11 @@ export function ChatHub({
   const [savingPhone, setSavingPhone] = useState(false);
   const [phoneError, setPhoneError] = useState('');
 
+  // WhatsApp OTP Verification State
+  const [otpStep, setOtpStep] = useState<'input_phone' | 'verify_otp'>('input_phone');
+  const [generatedOtp, setGeneratedOtp] = useState('');
+  const [enteredOtp, setEnteredOtp] = useState('');
+
   // Auto-scroll anchor
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const textInputRef = useRef<HTMLInputElement | null>(null);
@@ -571,16 +576,44 @@ export function ChatHub({
     };
   };
 
-  const handleOpenPhoneModal = (targetUid: string, targetName: string, currentPhone: string, isSelf: boolean, isCallTrigger = false) => {
+  const handleOpenPhoneModal = (targetUid: string, targetName: string, currentPhone: string, isCallTrigger = false) => {
+    // Only allow editing/registering the current user's own phone number
+    if (targetUid !== currentUid) return;
     setPhoneModal({
       isOpen: true,
-      targetUid,
-      targetName,
+      targetUid: currentUid,
+      targetName: settings.name || 'My Profile',
       phone: currentPhone || '',
-      isSelf,
+      isSelf: true,
       isCallTrigger
     });
+    setOtpStep('input_phone');
+    setGeneratedOtp('');
+    setEnteredOtp('');
     setPhoneError('');
+  };
+
+  const handleSendWhatsAppOtp = () => {
+    const digits = phoneModal.phone.replace(/[^0-9]/g, '');
+    if (digits.length < 10) {
+      setPhoneError("Phone number kam az kam 10 ya 11 digits ka hona chahiye (e.g. 03001234567)");
+      return;
+    }
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    setGeneratedOtp(code);
+    setEnteredOtp('');
+    setPhoneError('');
+    setOtpStep('verify_otp');
+
+    // Prepare WhatsApp wa.me link
+    let formattedForWa = digits;
+    if (formattedForWa.startsWith('03')) {
+      formattedForWa = '92' + formattedForWa.slice(1);
+    }
+
+    const text = encodeURIComponent(`Assalam-o-Alaikum! My Dukan Pro Verification Code is: ${code} for number: ${phoneModal.phone}. Please verify my account.`);
+    const waUrl = `https://wa.me/${formattedForWa}?text=${text}`;
+    window.open(waUrl, '_blank');
   };
 
   const handleSavePhone = async (e: React.FormEvent) => {
@@ -590,41 +623,27 @@ export function ChatHub({
       setPhoneError("Phone number kam az kam 10 ya 11 digits ka hona chahiye (e.g. 03001234567)");
       return;
     }
+
+    if (otpStep === 'verify_otp' && enteredOtp.trim() !== generatedOtp.trim()) {
+      setPhoneError("Ghalat OTP Code! WhatsApp message wala 6-digit code enter karein.");
+      return;
+    }
+
     setSavingPhone(true);
     try {
-      if (phoneModal.isSelf) {
-        await FirestoreService.updateUserProfilePhone(phoneModal.phone, phoneModal.targetName);
-      } else if (activeRoom) {
-        await FirestoreService.updateParticipantPhone(activeRoom.id, phoneModal.targetUid, phoneModal.phone, phoneModal.targetName);
-        setActiveRoom(prev => {
-          if (!prev) return prev;
-          return {
-            ...prev,
-            participantDetails: {
-              ...prev.participantDetails,
-              [phoneModal.targetUid]: {
-                ...(prev.participantDetails?.[phoneModal.targetUid] || { name: phoneModal.targetName }),
-                phone: phoneModal.phone
-              }
-            }
-          };
-        });
-      }
-
+      await FirestoreService.updateUserProfilePhone(phoneModal.phone, settings.name);
+      
       const wasCallTrigger = phoneModal.isCallTrigger;
-      const targetUid = phoneModal.targetUid;
-      const targetName = phoneModal.targetName;
-      const updatedPhone = phoneModal.phone;
 
       setPhoneModal(prev => ({ ...prev, isOpen: false }));
 
       if (wasCallTrigger && onStartVoiceCall && activeRoom) {
         const other = getOtherParticipant(activeRoom);
-        const otherUid = activeRoom.participants.find(p => p !== currentUid) || targetUid;
+        const otherUid = activeRoom.participants.find(p => p !== currentUid) || '';
         onStartVoiceCall({
           uid: otherUid,
-          name: other.name || targetName,
-          phone: updatedPhone,
+          name: other.name,
+          phone: other.phone || '',
           photoURL: other.photoURL
         });
       }
@@ -641,22 +660,16 @@ export function ChatHub({
     const other = getOtherParticipant(activeRoom);
     const otherUid = activeRoom.participants.find(p => p !== currentUid) || '';
 
-    // Check if caller has valid 10/11 digit mobile number
+    // Check if caller has valid 10/11 digit mobile number. If not, prompt caller once to register.
     if (!isValidPhone(settings.phone)) {
-      handleOpenPhoneModal(currentUid || '', settings.name || 'My Profile', settings.phone || '', true, true);
-      return;
-    }
-
-    // Check if receiver has valid 10/11 digit mobile number
-    if (!isValidPhone(other.phone)) {
-      handleOpenPhoneModal(otherUid, other.name, other.phone || '', false, true);
+      handleOpenPhoneModal(currentUid || '', settings.name || 'My Profile', settings.phone || '', true);
       return;
     }
 
     onStartVoiceCall?.({
       uid: otherUid,
       name: other.name,
-      phone: other.phone,
+      phone: other.phone || '',
       photoURL: other.photoURL
     });
   };
@@ -790,7 +803,7 @@ export function ChatHub({
               </div>
               <button
                 type="button"
-                onClick={() => handleOpenPhoneModal(currentUid || '', settings.name || 'My Profile', settings.phone || '', true)}
+                onClick={() => handleOpenPhoneModal(currentUid || '', settings.name || 'My Profile', settings.phone || '')}
                 className="shrink-0 bg-white text-amber-900 px-2.5 py-1 rounded-lg font-black text-[10px] shadow hover:bg-amber-50 active:scale-95 transition-transform"
               >
                 Add Number
@@ -1255,33 +1268,11 @@ export function ChatHub({
                           <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">
                             {formatPhoneDisplay(getOtherParticipant(activeRoom).phone)}
                           </span>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const other = getOtherParticipant(activeRoom);
-                              const otherUid = activeRoom.participants.find(p => p !== currentUid) || '';
-                              handleOpenPhoneModal(otherUid, other.name, other.phone || '', false);
-                            }}
-                            className="text-[9px] text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 font-semibold underline ml-0.5"
-                            title="Edit Phone Number"
-                          >
-                            Edit
-                          </button>
                         </div>
                       ) : (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const other = getOtherParticipant(activeRoom);
-                            const otherUid = activeRoom.participants.find(p => p !== currentUid) || '';
-                            handleOpenPhoneModal(otherUid, other.name, other.phone || '', false);
-                          }}
-                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 text-[10px] font-black hover:bg-amber-200 transition-colors shadow-xs"
-                          title="Add full 11-digit mobile number"
-                        >
-                          <AlertCircle size={10} className="text-amber-600 dark:text-amber-400" />
-                          <span>{getOtherParticipant(activeRoom).phone ? `${getOtherParticipant(activeRoom).phone} (Incomplete)` : 'No Number'} • Add Mobile Number</span>
-                        </button>
+                        <span className="text-[10px] text-slate-400 dark:text-slate-500 font-semibold">
+                          {getOtherParticipant(activeRoom).phone || 'Direct Chat'}
+                        </span>
                       )}
                     </div>
                   </div>
@@ -1325,7 +1316,7 @@ export function ChatHub({
               </div>
 
               {/* Messages Body (Instant Realtime Sync across Mobiles & PC) */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
                 {messages.length === 0 ? (
                   <div className="text-center py-12">
                     <span className="text-[11px] bg-slate-200/70 dark:bg-slate-800/80 text-slate-500 dark:text-slate-400 px-3.5 py-1.5 rounded-full font-medium shadow-sm inline-flex items-center gap-1.5">
@@ -1482,7 +1473,7 @@ export function ChatHub({
               </div>
 
               {/* Bottom Input Area */}
-              <div className="p-2.5 md:p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700">
+              <div className="shrink-0 sticky bottom-0 z-20 p-2.5 md:p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 shadow-md">
                 {isRecording ? (
                   /* Live Recording View */
                   <div className="flex items-center justify-between bg-rose-50 dark:bg-rose-950/40 p-2.5 rounded-2xl border border-rose-200 dark:border-rose-900 animate-pulse">
@@ -1540,6 +1531,11 @@ export function ChatHub({
                       placeholder="Message likhein..."
                       value={textInput}
                       onChange={(e) => setTextInput(e.target.value)}
+                      onFocus={() => {
+                        setTimeout(() => {
+                          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+                        }, 250);
+                      }}
                       className="flex-1 bg-slate-100 dark:bg-slate-700 text-slate-900 dark:text-white px-4 py-3 rounded-2xl text-xs md:text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 border border-slate-200 dark:border-slate-600"
                     />
 
@@ -1616,65 +1612,134 @@ export function ChatHub({
             </div>
 
             <form onSubmit={handleSavePhone} className="space-y-4">
-              <div>
-                <label className="block text-xs font-black text-slate-700 dark:text-slate-300 mb-1.5">
-                  11-Digit Mobile Number (e.g. 03001234567)
-                </label>
-                <div className="relative">
-                  <input
-                    type="tel"
-                    required
-                    placeholder="03001234567"
-                    value={phoneModal.phone}
-                    onChange={(e) => {
-                      setPhoneModal(prev => ({ ...prev, phone: e.target.value }));
-                      setPhoneError('');
-                    }}
-                    autoFocus
-                    className="w-full px-4 py-3 pl-11 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-2xl text-sm font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  />
-                  <div className="absolute left-3.5 top-3 text-base">
-                    📱
-                  </div>
-                  {isValidPhone(phoneModal.phone) && (
-                    <div className="absolute right-3.5 top-3.5 text-emerald-500">
-                      <CheckCircle size={18} />
+              {otpStep === 'input_phone' ? (
+                <div>
+                  <label className="block text-xs font-black text-slate-700 dark:text-slate-300 mb-1.5">
+                    11-Digit Mobile Number (e.g. 03001234567)
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="tel"
+                      required
+                      placeholder="03001234567"
+                      value={phoneModal.phone}
+                      onChange={(e) => {
+                        setPhoneModal(prev => ({ ...prev, phone: e.target.value }));
+                        setPhoneError('');
+                      }}
+                      autoFocus
+                      className="w-full px-4 py-3 pl-11 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-2xl text-sm font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                    <div className="absolute left-3.5 top-3 text-base">
+                      📱
                     </div>
+                    {isValidPhone(phoneModal.phone) && (
+                      <div className="absolute right-3.5 top-3.5 text-emerald-500">
+                        <CheckCircle size={18} />
+                      </div>
+                    )}
+                  </div>
+                  {phoneError && (
+                    <p className="text-xs text-rose-500 font-bold mt-1.5 flex items-center gap-1">
+                      <AlertCircle size={13} /> {phoneError}
+                    </p>
                   )}
-                </div>
-                {phoneError && (
-                  <p className="text-xs text-rose-500 font-bold mt-1.5 flex items-center gap-1">
-                    <AlertCircle size={13} /> {phoneError}
+                  <p className="text-[10px] text-slate-400 mt-1.5">
+                    💡 Is number ko verify karne ke liye 1-click WhatsApp OTP sent kiya jayega.
                   </p>
-                )}
-                <p className="text-[10px] text-slate-400 mt-1.5">
-                  💡 Yeh number Dukan Pro directory mein save hoga taake call history aur search mein mukammal record rahe.
-                </p>
-              </div>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 rounded-2xl p-3 text-center">
+                    <p className="text-xs font-black text-emerald-900 dark:text-emerald-200">
+                      📱 WhatsApp Par OTP Bhej Diya Gaya Hai
+                    </p>
+                    <p className="text-[11px] text-emerald-700 dark:text-emerald-400 mt-0.5">
+                      WhatsApp App khul gaya hoga. Message send karke wahan aaya hua 6-digit code yahan daalein:
+                    </p>
+                    <div className="mt-2 inline-flex items-center gap-1 px-3 py-1 bg-emerald-600 text-white rounded-full text-xs font-black shadow-xs">
+                      <span>💡 Demo Test OTP:</span>
+                      <span className="font-mono text-sm tracking-widest">{generatedOtp}</span>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-black text-slate-700 dark:text-slate-300 mb-1.5">
+                      Enter 6-Digit WhatsApp OTP Code
+                    </label>
+                    <input
+                      type="text"
+                      maxLength={6}
+                      required
+                      placeholder="e.g. 592814"
+                      value={enteredOtp}
+                      onChange={(e) => {
+                        setEnteredOtp(e.target.value.replace(/[^0-9]/g, ''));
+                        setPhoneError('');
+                      }}
+                      autoFocus
+                      className="w-full text-center tracking-widest text-lg font-mono px-4 py-2.5 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-2xl font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                    {phoneError && (
+                      <p className="text-xs text-rose-500 font-bold mt-1.5 flex items-center gap-1 justify-center">
+                        <AlertCircle size={13} /> {phoneError}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="text-center pt-1">
+                    <button
+                      type="button"
+                      onClick={handleSendWhatsAppOtp}
+                      className="text-[11px] text-emerald-600 dark:text-emerald-400 font-bold underline hover:text-emerald-700"
+                    >
+                      🔁 Dobara WhatsApp Code Bhejein
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <div className="flex items-center gap-2 pt-2">
                 <button
                   type="button"
-                  onClick={() => setPhoneModal(prev => ({ ...prev, isOpen: false }))}
+                  onClick={() => {
+                    if (otpStep === 'verify_otp') {
+                      setOtpStep('input_phone');
+                      setPhoneError('');
+                    } else {
+                      setPhoneModal(prev => ({ ...prev, isOpen: false }));
+                    }
+                  }}
                   className="flex-1 py-3 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 rounded-2xl text-xs font-black transition-colors"
                 >
-                  Cancel
+                  {otpStep === 'verify_otp' ? 'Back' : 'Cancel'}
                 </button>
-                <button
-                  type="submit"
-                  disabled={savingPhone}
-                  className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-2xl text-xs font-black shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-1.5 transition-all"
-                >
-                  {savingPhone ? (
-                    <>
-                      <Loader2 size={16} className="animate-spin" /> Saving...
-                    </>
-                  ) : (
-                    <>
-                      {phoneModal.isCallTrigger ? 'Save & Call' : 'Save Number'}
-                    </>
-                  )}
-                </button>
+
+                {otpStep === 'input_phone' ? (
+                  <button
+                    type="button"
+                    onClick={handleSendWhatsAppOtp}
+                    className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-2xl text-xs font-black shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-1.5 transition-all"
+                  >
+                    <span>🟢 Verify via WhatsApp</span>
+                  </button>
+                ) : (
+                  <button
+                    type="submit"
+                    disabled={savingPhone}
+                    className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-2xl text-xs font-black shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-1.5 transition-all"
+                  >
+                    {savingPhone ? (
+                      <>
+                        <Loader2 size={16} className="animate-spin" /> Verifying...
+                      </>
+                    ) : (
+                      <>
+                        {phoneModal.isCallTrigger ? 'Verify & Call' : 'Verify & Save'}
+                      </>
+                    )}
+                  </button>
+                )}
               </div>
             </form>
           </div>

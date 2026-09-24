@@ -523,6 +523,8 @@ export const FirestoreService = {
           callback(data.current_barcode);
         }
       }
+    }, (err) => {
+      console.warn("Scanner session subscription notice:", err);
     });
   },
 

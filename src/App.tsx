@@ -962,7 +962,7 @@ function MainApp() {
         </header>
 
         {/* Scrollable Content Area */}
-        <main className={cn("flex-1", activeTab === 'chat' ? "h-[calc(100dvh-64px)] overflow-hidden p-0 md:p-3" : "overflow-y-auto p-4 md:p-8 pb-32")}>
+        <main className={cn("flex-1 min-h-0", activeTab === 'chat' ? "h-[calc(100dvh-64px)] overflow-hidden p-0 md:p-3" : "overflow-y-auto p-4 md:p-8 pb-32")}>
           <AnimatePresence mode="wait">
             <motion.div
               key={activeTab}
@@ -970,7 +970,7 @@ function MainApp() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
               transition={{ duration: 0.2, ease: "easeOut" }}
-              className={cn(activeTab === 'chat' && "h-full")}
+              className={cn(activeTab === 'chat' && "h-full min-h-0 flex flex-col")}
             >
               {renderContent()}
             </motion.div>
