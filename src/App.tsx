@@ -140,6 +140,34 @@ function MainApp() {
     };
   }, []);
 
+  // Visual Viewport tracking for mobile soft keyboards (eliminates gap above keyboard)
+  useEffect(() => {
+    const updateAppHeight = () => {
+      const vv = window.visualViewport;
+      const h = vv ? vv.height : window.innerHeight;
+      document.documentElement.style.setProperty('--app-height', `${h}px`);
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('resize', updateAppHeight);
+      if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', updateAppHeight);
+        window.visualViewport.addEventListener('scroll', updateAppHeight);
+      }
+      updateAppHeight();
+    }
+
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('resize', updateAppHeight);
+        if (window.visualViewport) {
+          window.visualViewport.removeEventListener('resize', updateAppHeight);
+          window.visualViewport.removeEventListener('scroll', updateAppHeight);
+        }
+      }
+    };
+  }, []);
+
   // Sync effect
   useEffect(() => {
     if (isOnline && user && !localStorage.getItem('dukan_has_migrated')) {
@@ -779,7 +807,10 @@ function MainApp() {
 
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col h-screen w-full bg-slate-50 dark:bg-slate-900 relative overflow-hidden">
+      <div 
+        className="flex-1 flex flex-col w-full bg-slate-50 dark:bg-slate-900 relative overflow-hidden"
+        style={{ height: 'var(--app-height, 100vh)' }}
+      >
         {/* Top Header - Responsive */}
         <header className="h-16 md:h-20 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between px-4 md:px-8 shrink-0 z-20 sticky top-0 md:bg-white/80 dark:md:bg-slate-800/80 md:backdrop-blur-md">
           <div className="flex items-center gap-3">
@@ -962,7 +993,7 @@ function MainApp() {
         </header>
 
         {/* Scrollable Content Area */}
-        <main className={cn("flex-1 min-h-0", activeTab === 'chat' ? "h-[calc(100dvh-64px)] overflow-hidden p-0 md:p-3" : "overflow-y-auto p-4 md:p-8 pb-32")}>
+        <main className={cn("flex-1 min-h-0", activeTab === 'chat' ? "h-full overflow-hidden p-0 md:p-3" : "overflow-y-auto p-4 md:p-8 pb-32")}>
           <AnimatePresence mode="wait">
             <motion.div
               key={activeTab}
@@ -970,7 +1001,7 @@ function MainApp() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
               transition={{ duration: 0.2, ease: "easeOut" }}
-              className={cn(activeTab === 'chat' && "h-full min-h-0 flex flex-col")}
+              className={cn(activeTab === 'chat' && "h-full")}
             >
               {renderContent()}
             </motion.div>

@@ -25,6 +25,78 @@ export function Settings({ settings, setSettings }: SettingsProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
 
+  // Settings Phone Number & WhatsApp OTP State
+  const [phoneStatusMsg, setPhoneStatusMsg] = useState('');
+  const [phoneStatusIsError, setPhoneStatusIsError] = useState(false);
+  const [settingsOtpStep, setSettingsOtpStep] = useState<'none' | 'verify_otp'>('none');
+  const [generatedSettingsOtp, setGeneratedSettingsOtp] = useState('');
+  const [enteredSettingsOtp, setEnteredSettingsOtp] = useState('');
+  const [isSavingSettingsPhone, setIsSavingSettingsPhone] = useState(false);
+
+  const handleSavePhoneAndTriggerWhatsAppOtp = async () => {
+    const digits = (settings.phone || '').replace(/[^0-9]/g, '');
+    if (digits.length < 10) {
+      setPhoneStatusIsError(true);
+      setPhoneStatusMsg('Phone number kam az kam 10 ya 11 digits ka hona chahiye (e.g. 03001234567)');
+      return;
+    }
+
+    setPhoneStatusIsError(false);
+    setPhoneStatusMsg('');
+    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    setGeneratedSettingsOtp(code);
+    setEnteredSettingsOtp('');
+    setSettingsOtpStep('verify_otp');
+
+    // Format for WhatsApp link
+    let formattedForWa = digits;
+    if (formattedForWa.startsWith('03')) {
+      formattedForWa = '92' + formattedForWa.slice(1);
+    }
+
+    const text = encodeURIComponent(`Assalam-o-Alaikum! My Dukan Pro Verification Code is: ${code} for number: ${settings.phone}. Please verify my account.`);
+    
+    // Direct WhatsApp protocol link without text parameter opens WhatsApp chat directly without iOS preview sheet
+    const directWaProtocolNoSheet = `whatsapp://send?phone=${formattedForWa}`;
+    const webWaUrl = `https://wa.me/${formattedForWa}?text=${text}`;
+
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    if (isMobile) {
+      // Deep link opens WhatsApp app directly with zero preview sheet
+      window.location.href = directWaProtocolNoSheet;
+    } else {
+      window.open(webWaUrl, '_blank');
+    }
+  };
+
+  const handleVerifySettingsOtpAndSave = async () => {
+    if (enteredSettingsOtp.trim() !== generatedSettingsOtp.trim()) {
+      setPhoneStatusIsError(true);
+      setPhoneStatusMsg('Ghalat OTP Code! WhatsApp app se dekhein aur 6-digit code sahi enter karein.');
+      return;
+    }
+
+    setIsSavingSettingsPhone(true);
+    setPhoneStatusIsError(false);
+    try {
+      await FirestoreService.saveSettings({
+        ...settings,
+        phone: settings.phone
+      });
+      await FirestoreService.updateUserProfilePhone(settings.phone, settings.name);
+      
+      setSettingsOtpStep('none');
+      setPhoneStatusIsError(false);
+      setPhoneStatusMsg('✅ Mobile Number Success! Profile & Database mein verified save ho gaya hai.');
+    } catch (err) {
+      console.error("Save phone error in settings:", err);
+      setPhoneStatusIsError(true);
+      setPhoneStatusMsg('Failed to save. Network check karein.');
+    } finally {
+      setIsSavingSettingsPhone(false);
+    }
+  };
+
   useEffect(() => {
     const handlePopState = () => {
       if (activeModal) {
@@ -617,13 +689,76 @@ export function Settings({ settings, setSettings }: SettingsProps) {
           </div>
 
           <div>
-            <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Phone Number / Mobile Number</label>
-            <input 
-              type="tel" 
-              className="w-full bg-slate-50 dark:bg-slate-700 border-none rounded-xl py-3 px-4 mt-1 text-sm font-bold dark:text-white focus:ring-2 focus:ring-slate-200 dark:focus:ring-slate-600"
-              value={settings.phone}
-              onChange={(e) => setSettings({...settings, phone: e.target.value})}
-            />
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[10px] font-bold text-slate-400 uppercase ml-1">Phone Number / Mobile Number</label>
+              {settings.phone && (
+                <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-extrabold flex items-center gap-1">
+                  ✓ Active Number
+                </span>
+              )}
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input 
+                type="tel" 
+                placeholder="03001234567"
+                className="flex-1 bg-slate-50 dark:bg-slate-700 border-none rounded-xl py-3 px-4 text-sm font-bold dark:text-white focus:ring-2 focus:ring-emerald-500"
+                value={settings.phone}
+                onChange={(e) => {
+                  setSettings({...settings, phone: e.target.value});
+                  setPhoneStatusMsg('');
+                  setPhoneStatusIsError(false);
+                }}
+              />
+              <button
+                type="button"
+                onClick={handleSavePhoneAndTriggerWhatsAppOtp}
+                className="shrink-0 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white px-4 py-3 rounded-xl text-xs font-black shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-1.5 transition-all"
+              >
+                <span>📱 Save Number & Verify via WhatsApp</span>
+              </button>
+            </div>
+
+            {settingsOtpStep === 'verify_otp' && (
+              <div className="mt-3 p-4 bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 rounded-2xl space-y-3 animate-in fade-in">
+                <div className="text-center">
+                  <p className="text-xs font-black text-emerald-900 dark:text-emerald-200">
+                    📱 WhatsApp OTP Verification
+                  </p>
+                  <p className="text-[11px] text-emerald-800 dark:text-emerald-300 mt-1 font-medium">
+                    Enter six digit code received from WhatsApp
+                  </p>
+                </div>
+
+                <div className="space-y-2 max-w-xs mx-auto">
+                  <input
+                    type="text"
+                    maxLength={6}
+                    placeholder="Enter 6-digit code"
+                    value={enteredSettingsOtp}
+                    onChange={(e) => {
+                      setEnteredSettingsOtp(e.target.value.replace(/[^0-9]/g, ''));
+                      setPhoneStatusMsg('');
+                    }}
+                    className="w-full text-center font-mono tracking-widest text-base px-3 py-2.5 bg-white dark:bg-slate-800 border border-emerald-300 dark:border-emerald-700 rounded-xl font-bold dark:text-white focus:ring-2 focus:ring-emerald-500"
+                  />
+                  <button
+                    type="button"
+                    disabled={isSavingSettingsPhone}
+                    onClick={handleVerifySettingsOtpAndSave}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-xl text-xs font-black shadow transition-all"
+                  >
+                    {isSavingSettingsPhone ? 'Saving...' : 'Verify & Save'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {phoneStatusMsg && (
+              <p className={cn("text-xs font-bold mt-2 flex items-center gap-1", phoneStatusIsError ? "text-rose-500" : "text-emerald-600 dark:text-emerald-400")}>
+                {phoneStatusMsg}
+              </p>
+            )}
           </div>
 
           <div>

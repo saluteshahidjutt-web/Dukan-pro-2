@@ -612,8 +612,15 @@ export function ChatHub({
     }
 
     const text = encodeURIComponent(`Assalam-o-Alaikum! My Dukan Pro Verification Code is: ${code} for number: ${phoneModal.phone}. Please verify my account.`);
+    const directWaProtocolNoSheet = `whatsapp://send?phone=${formattedForWa}`;
     const waUrl = `https://wa.me/${formattedForWa}?text=${text}`;
-    window.open(waUrl, '_blank');
+
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    if (isMobile) {
+      window.location.href = directWaProtocolNoSheet;
+    } else {
+      window.open(waUrl, '_blank');
+    }
   };
 
   const handleSavePhone = async (e: React.FormEvent) => {
@@ -1473,7 +1480,7 @@ export function ChatHub({
               </div>
 
               {/* Bottom Input Area */}
-              <div className="shrink-0 sticky bottom-0 z-20 p-2.5 md:p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 shadow-md">
+              <div className="shrink-0 z-20 p-2.5 md:p-3 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 shadow-md">
                 {isRecording ? (
                   /* Live Recording View */
                   <div className="flex items-center justify-between bg-rose-50 dark:bg-rose-950/40 p-2.5 rounded-2xl border border-rose-200 dark:border-rose-900 animate-pulse">
