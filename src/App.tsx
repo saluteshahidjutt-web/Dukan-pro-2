@@ -38,6 +38,7 @@ import { PINScreen } from './components/PINScreen';
 import { ConfirmModal } from './components/ConfirmModal';
 import { VoiceCallModal } from './components/VoiceCallModal';
 import { webrtcService } from './lib/webrtcService';
+import { notificationService } from './lib/notificationService';
 import { 
   onAuthStateChanged, 
   signOut,
@@ -182,16 +183,30 @@ function MainApp() {
   // Global Incoming Call Listener across all screens
   useEffect(() => {
     if (!user) return;
+
+    // Proactively request notification permission on login if not yet decided
+    if (notificationService.isSupported() && Notification.permission === 'default') {
+      notificationService.requestPermission().catch(() => {});
+    }
+
     const unsub = webrtcService.subscribeToIncomingCalls((call) => {
       if (call) {
         setIncomingCall(call);
         webrtcService.playIncomingRingtone();
+        notificationService.showIncomingCallNotification(
+          { name: call.callerName, phone: call.callerPhone },
+          call.id
+        );
       } else {
         setIncomingCall(null);
         webrtcService.stopRingtone();
+        notificationService.dismissIncomingCallNotification();
       }
     });
-    return () => unsub();
+    return () => {
+      unsub();
+      notificationService.dismissIncomingCallNotification();
+    };
   }, [user]);
 
   const handleStartVoiceCall = async (targetUser: { uid: string; name: string; phone: string; photoURL?: string }) => {
@@ -239,6 +254,7 @@ function MainApp() {
     const callToAnswer = incomingCall;
     setIncomingCall(null);
     webrtcService.stopRingtone();
+    notificationService.dismissIncomingCallNotification(callToAnswer.id);
     setCurrentCall({ ...callToAnswer, status: 'connected' });
 
     try {
@@ -260,6 +276,7 @@ function MainApp() {
     const callToReject = incomingCall;
     setIncomingCall(null);
     webrtcService.stopRingtone();
+    notificationService.dismissIncomingCallNotification(callToReject.id);
     const caller = {
       uid: callToReject.callerId,
       name: callToReject.callerName,
@@ -277,6 +294,7 @@ function MainApp() {
 
   const handleEndActiveCall = async () => {
     if (currentCall) {
+      notificationService.dismissIncomingCallNotification(currentCall.id);
       await webrtcService.endCall(currentCall.id);
       setCurrentCall(null);
     }
@@ -838,26 +856,6 @@ function MainApp() {
                 <span className="sm:hidden">Sale</span>
               </button>
             )}
-
-            {/* Chat Direct Quick Access Button (Can be toggled in Settings) */}
-            {shopSettings.chatEnabled !== false && (
-              <button 
-                onClick={() => {
-                  setChatTargetUser(null);
-                  setActiveTab(activeTab === 'chat' ? 'dashboard' : 'chat');
-                }}
-                className={cn(
-                  "p-2 md:px-3 md:py-2 rounded-xl transition-all font-bold text-xs flex items-center gap-1.5 active:scale-95",
-                  activeTab === 'chat' 
-                    ? "bg-emerald-600 text-white shadow-md shadow-emerald-200" 
-                    : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-                )}
-                title="Chat & Voice Notes"
-              >
-                <MessageSquare size={18} />
-                <span className="hidden md:inline">Chat</span>
-              </button>
-            )}
             
             <div className="relative">
               <button 
@@ -964,7 +962,7 @@ function MainApp() {
         </header>
 
         {/* Scrollable Content Area */}
-        <main className={cn("flex-1 overflow-y-auto", activeTab === 'chat' ? "p-2 md:p-6 pb-2" : "p-4 md:p-8 pb-32")}>
+        <main className={cn("flex-1", activeTab === 'chat' ? "h-[calc(100dvh-64px)] overflow-hidden p-0 md:p-3" : "overflow-y-auto p-4 md:p-8 pb-32")}>
           <AnimatePresence mode="wait">
             <motion.div
               key={activeTab}
@@ -972,6 +970,7 @@ function MainApp() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
               transition={{ duration: 0.2, ease: "easeOut" }}
+              className={cn(activeTab === 'chat' && "h-full")}
             >
               {renderContent()}
             </motion.div>
@@ -1023,20 +1022,22 @@ function MainApp() {
               onTouchStart={(e) => {
                 const rect = e.currentTarget.getBoundingClientRect();
                 const relativeX = e.touches[0].clientX - rect.left;
-                const tabs = ['dashboard', 'customers', 'pos', 'inventory', 'reports'];
+                const tabs = ['dashboard', 'customers', 'pos', 'inventory', 'chat'];
                 const idx = Math.max(0, Math.min(tabs.length - 1, Math.floor((relativeX / rect.width) * tabs.length)));
                 const targetTab = tabs[idx];
                 if (targetTab && targetTab !== activeTab) {
+                  if (targetTab === 'chat') setChatTargetUser(null);
                   setActiveTab(targetTab);
                 }
               }}
               onTouchMove={(e) => {
                 const rect = e.currentTarget.getBoundingClientRect();
                 const relativeX = e.touches[0].clientX - rect.left;
-                const tabs = ['dashboard', 'customers', 'pos', 'inventory', 'reports'];
+                const tabs = ['dashboard', 'customers', 'pos', 'inventory', 'chat'];
                 const idx = Math.max(0, Math.min(tabs.length - 1, Math.floor((relativeX / rect.width) * tabs.length)));
                 const targetTab = tabs[idx];
                 if (targetTab && targetTab !== activeTab) {
+                  if (targetTab === 'chat') setChatTargetUser(null);
                   setActiveTab(targetTab);
                   if (typeof window !== 'undefined' && 'vibrate' in navigator) {
                     try { navigator.vibrate(8); } catch (_) {}
@@ -1046,10 +1047,11 @@ function MainApp() {
               onPointerDown={(e) => {
                 const rect = e.currentTarget.getBoundingClientRect();
                 const relativeX = e.clientX - rect.left;
-                const tabs = ['dashboard', 'customers', 'pos', 'inventory', 'reports'];
+                const tabs = ['dashboard', 'customers', 'pos', 'inventory', 'chat'];
                 const idx = Math.max(0, Math.min(tabs.length - 1, Math.floor((relativeX / rect.width) * tabs.length)));
                 const targetTab = tabs[idx];
                 if (targetTab && targetTab !== activeTab) {
+                  if (targetTab === 'chat') setChatTargetUser(null);
                   setActiveTab(targetTab);
                 }
               }}
@@ -1057,10 +1059,11 @@ function MainApp() {
                 if (e.buttons !== 1) return;
                 const rect = e.currentTarget.getBoundingClientRect();
                 const relativeX = e.clientX - rect.left;
-                const tabs = ['dashboard', 'customers', 'pos', 'inventory', 'reports'];
+                const tabs = ['dashboard', 'customers', 'pos', 'inventory', 'chat'];
                 const idx = Math.max(0, Math.min(tabs.length - 1, Math.floor((relativeX / rect.width) * tabs.length)));
                 const targetTab = tabs[idx];
                 if (targetTab && targetTab !== activeTab) {
+                  if (targetTab === 'chat') setChatTargetUser(null);
                   setActiveTab(targetTab);
                   if (typeof window !== 'undefined' && 'vibrate' in navigator) {
                     try { navigator.vibrate(8); } catch (_) {}
@@ -1080,7 +1083,7 @@ function MainApp() {
                 </div>
               } label={t.sale} isCenter />
               <NavItem id="inventory" active={activeTab === 'inventory'} onClick={() => setActiveTab('inventory')} icon={<Package size={20} />} label={t.stock} />
-              <NavItem id="reports" active={activeTab === 'reports'} onClick={() => setActiveTab('reports')} icon={<BarChart3 size={20} />} label={t.report} />
+              <NavItem id="chat" active={activeTab === 'chat'} onClick={() => { setChatTargetUser(null); setActiveTab('chat'); }} icon={<MessageSquare size={20} />} label={t.chat || 'Chat'} />
             </nav>
           </div>
         </>

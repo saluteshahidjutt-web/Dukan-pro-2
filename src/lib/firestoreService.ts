@@ -16,7 +16,7 @@ import {
   FirestoreError
 } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from './firebase';
-import { Product, Customer, Transaction, ShopSettings, Expense, UserProfile, ChatRoom, ChatMessage } from '../types';
+import { Product, Customer, Transaction, ShopSettings, Expense, UserProfile, ChatRoom, ChatMessage, CallSession } from '../types';
 import { generateId } from './utils';
 
 // Mock storage keys
@@ -42,6 +42,13 @@ const getLocal = <T>(key: string, defaultValue: T): T => {
 const setLocal = <T>(key: string, data: T) => {
   localStorage.setItem(key, JSON.stringify(data));
   window.dispatchEvent(new Event('dukan_storage_update'));
+};
+
+export const getChatRoomId = (uid1: string, uid2: string): string => {
+  const p0 = uid1.replace(/[^a-zA-Z0-9]/g, '_');
+  const p1 = uid2.replace(/[^a-zA-Z0-9]/g, '_');
+  const sortedClean = [p0, p1].sort();
+  return `room_${sortedClean[0]}_${sortedClean[1]}`;
 };
 
 export const FirestoreService = {
@@ -669,9 +676,93 @@ export const FirestoreService = {
         status: 'Hey there! I am using Dukaan Pro Chat',
         updatedAt: new Date().toISOString()
       };
-      await setDoc(doc(db, 'users', user.uid), userDoc);
+      await setDoc(doc(db, 'users', user.uid), userDoc, { merge: true });
     } catch (e) {
       console.warn("UserProfile sync skipped or offline:", e);
+    }
+  },
+
+  updateUserProfilePhone: async (phone: string, name?: string) => {
+    const user = auth.currentUser;
+    if (!user) return false;
+    const cleanPhone = phone.trim().replace(/[\s\-\+]/g, '');
+    try {
+      // 1. Check if another user profile previously held this phone number
+      try {
+        const usersRef = collection(db, 'users');
+        const existingQuery = query(usersRef, where('phone', '==', cleanPhone), limit(5));
+        const snap = await getDocs(existingQuery);
+        for (const docSnap of snap.docs) {
+          if (docSnap.id !== user.uid) {
+            // Detach duplicate phone from previous account so incoming calls/search map strictly to current active user
+            await setDoc(doc(db, 'users', docSnap.id), {
+              phone: '',
+              phoneTransferredTo: user.uid,
+              updatedAt: new Date().toISOString()
+            }, { merge: true }).catch(() => {});
+          }
+        }
+      } catch (e) {
+        console.warn("Phone duplicate check skipped or offline:", e);
+      }
+
+      // 2. Set phone on current user's profile
+      await setDoc(doc(db, 'users', user.uid), {
+        id: user.uid,
+        uid: user.uid,
+        phone: cleanPhone,
+        ...(name ? { name } : {}),
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+
+      const settingsRef = doc(db, 'settings', user.uid);
+      await updateDoc(settingsRef, {
+        phone: cleanPhone,
+        ...(name ? { name } : {}),
+        updatedAt: new Date().toISOString()
+      }).catch(() => {});
+
+      const localSettings = getLocal<ShopSettings | null>(LOCAL_KEYS.SETTINGS, null);
+      if (localSettings) {
+        setLocal(LOCAL_KEYS.SETTINGS, {
+          ...localSettings,
+          phone: cleanPhone,
+          ...(name ? { name } : {})
+        });
+      }
+      return true;
+    } catch (e) {
+      console.warn("Update user profile phone err:", e);
+      return false;
+    }
+  },
+
+  updateParticipantPhone: async (roomId: string, targetUid: string, phone: string, name?: string) => {
+    const cleanPhone = phone.trim().replace(/[\s\-\+]/g, '');
+    try {
+      const roomRef = doc(db, 'chat_rooms', roomId);
+      const updates: any = {
+        [`participantDetails.${targetUid}.phone`]: cleanPhone,
+        updatedAt: new Date().toISOString()
+      };
+      if (name) {
+        updates[`participantDetails.${targetUid}.name`] = name;
+      }
+      await updateDoc(roomRef, updates);
+
+      const userRef = doc(db, 'users', targetUid);
+      await setDoc(userRef, {
+        id: targetUid,
+        uid: targetUid,
+        phone: cleanPhone,
+        ...(name ? { name } : {}),
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+
+      return true;
+    } catch (e) {
+      console.warn("Update participant phone error:", e);
+      return false;
     }
   },
 
@@ -824,8 +915,36 @@ export const FirestoreService = {
     return onSnapshot(
       q,
       (snapshot) => {
-        const rooms = snapshot.docs.map(d => d.data() as ChatRoom);
-        rooms.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+        const rawRooms = snapshot.docs.map(d => ({ ...(d.data() as ChatRoom), id: d.id }));
+        
+        // Robust deduplication by UID, Phone number, or Participant Name
+        const roomsMap = new Map<string, ChatRoom>();
+        for (const room of rawRooms) {
+          const otherUid = room.participants?.find(p => p !== currentUid);
+          const otherDetails = otherUid && room.participantDetails ? room.participantDetails[otherUid] : undefined;
+          
+          // Generate a unified deduplication key
+          const dedupKey = otherUid 
+            ? `uid_${otherUid}` 
+            : (otherDetails?.phone 
+                ? `phone_${otherDetails.phone.replace(/[^0-9]/g, '')}` 
+                : (otherDetails?.name ? `name_${otherDetails.name.trim().toLowerCase()}` : room.id));
+
+          const existing = roomsMap.get(dedupKey);
+          if (!existing) {
+            roomsMap.set(dedupKey, room);
+          } else {
+            const existingTime = new Date(existing.updatedAt || 0).getTime();
+            const currentTime = new Date(room.updatedAt || 0).getTime();
+            // Keep the room with the latest message/update
+            if (currentTime >= existingTime) {
+              roomsMap.set(dedupKey, room);
+            }
+          }
+        }
+
+        const rooms = Array.from(roomsMap.values());
+        rooms.sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime());
         callback(rooms);
       },
       (e) => {
@@ -923,7 +1042,7 @@ export const FirestoreService = {
   ) => {
     try {
       const sortedParticipants = [caller.uid, receiver.uid].sort();
-      const roomId = sortedParticipants.join('_');
+      const roomId = getChatRoomId(caller.uid, receiver.uid);
       const roomRef = doc(db, 'chat_rooms', roomId);
 
       // Ensure room exists
@@ -1020,6 +1139,49 @@ export const FirestoreService = {
         console.warn(`Messages subscription error for room ${roomId}:`, e);
       }
     );
+  },
+
+  subscribeToCallHistory: (callback: (calls: CallSession[]) => void) => {
+    const currentUid = auth.currentUser?.uid;
+    if (!currentUid) {
+      callback([]);
+      return () => {};
+    }
+
+    const q1 = query(
+      collection(db, 'calls'),
+      where('callerId', '==', currentUid)
+    );
+    const q2 = query(
+      collection(db, 'calls'),
+      where('receiverId', '==', currentUid)
+    );
+
+    let calls1: CallSession[] = [];
+    let calls2: CallSession[] = [];
+
+    const update = () => {
+      const combinedMap = new Map<string, CallSession>();
+      [...calls1, ...calls2].forEach(c => combinedMap.set(c.id, c));
+      const list = Array.from(combinedMap.values());
+      list.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+      callback(list);
+    };
+
+    const unsub1 = onSnapshot(q1, snap => {
+      calls1 = snap.docs.map(d => ({ id: d.id, ...d.data() } as CallSession));
+      update();
+    }, (err) => console.warn("Call history q1 err:", err));
+
+    const unsub2 = onSnapshot(q2, snap => {
+      calls2 = snap.docs.map(d => ({ id: d.id, ...d.data() } as CallSession));
+      update();
+    }, (err) => console.warn("Call history q2 err:", err));
+
+    return () => {
+      unsub1();
+      unsub2();
+    };
   }
 };
 

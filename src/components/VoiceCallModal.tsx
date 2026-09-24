@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Phone, PhoneOff, Mic, MicOff, Volume2, User, PhoneCall } from 'lucide-react';
+import { Phone, PhoneOff, Mic, MicOff, Volume2, User, PhoneCall, ShieldCheck } from 'lucide-react';
 import { CallSession } from '../types';
 import { webrtcService } from '../lib/webrtcService';
 import { cn } from '../lib/utils';
+import { formatPhoneDisplay, isValidPhone } from './ChatHub';
 
 interface VoiceCallModalProps {
   currentCall: CallSession | null;
@@ -121,7 +122,10 @@ export function VoiceCallModal({
         {/* User Info */}
         <div className="relative z-10 mt-3 mb-6">
           <h3 className="text-xl font-black tracking-tight text-white">{otherPerson.name}</h3>
-          <p className="text-xs text-slate-400 font-semibold mt-0.5">{otherPerson.phone || 'Dukaan Web Call'}</p>
+          <p className="text-xs text-emerald-400 font-bold mt-1 inline-flex items-center gap-1 bg-emerald-950/60 px-2.5 py-0.5 rounded-full border border-emerald-800/60">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            {isValidPhone(otherPerson.phone) ? formatPhoneDisplay(otherPerson.phone) : (otherPerson.phone || 'Dukaan Pro Live Call')}
+          </p>
         </div>
 
         {/* Action Controls */}

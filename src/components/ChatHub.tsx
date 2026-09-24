@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   Search, 
   Send, 
@@ -18,12 +18,35 @@ import {
   Lock,
   Loader2,
   Archive,
-  ArchiveRestore
+  ArchiveRestore,
+  Bell,
+  CheckCircle,
+  Edit3,
+  AlertCircle
 } from 'lucide-react';
 import { auth } from '../lib/firebase';
 import { FirestoreService } from '../lib/firestoreService';
-import { ChatRoom, ChatMessage, UserProfile, ShopSettings } from '../types';
+import { notificationService } from '../lib/notificationService';
+import { ChatRoom, ChatMessage, UserProfile, ShopSettings, CallSession } from '../types';
 import { cn } from '../lib/utils';
+
+export const isValidPhone = (phone?: string): boolean => {
+  if (!phone) return false;
+  const digits = phone.replace(/[^0-9]/g, '');
+  return digits.length >= 10;
+};
+
+export const formatPhoneDisplay = (phone?: string): string => {
+  if (!phone) return '';
+  const digits = phone.replace(/[^0-9]/g, '');
+  if (digits.startsWith('92') && digits.length === 12) {
+    return `+92 ${digits.slice(2, 5)} ${digits.slice(5)}`;
+  }
+  if (digits.startsWith('03') && digits.length === 11) {
+    return `${digits.slice(0, 4)} ${digits.slice(4)}`;
+  }
+  return phone;
+};
 
 interface ChatHubProps {
   settings: ShopSettings;
@@ -50,8 +73,15 @@ export function ChatHub({
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<UserProfile[]>([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [showArchivedView, setShowArchivedView] = useState(false);
+  
+  // Navigation Tabs: 'chats' | 'archived' | 'calls'
+  const [viewTab, setViewTab] = useState<'chats' | 'archived' | 'calls'>('chats');
   const [swipedRoomId, setSwipedRoomId] = useState<string | null>(null);
+
+  // Call History State
+  const [callHistory, setCallHistory] = useState<CallSession[]>([]);
+  const [callFilter, setCallFilter] = useState<'all' | 'missed' | 'completed'>('all');
+  const [callSearchQuery, setCallSearchQuery] = useState('');
 
   // Touch Swipe Gesture State
   const touchStartRef = useRef<number | null>(null);
@@ -72,8 +102,48 @@ export function ChatHub({
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [selectedPreviewImage, setSelectedPreviewImage] = useState<string | null>(null);
 
+  // Phone Number Update & Registration Modal
+  const [phoneModal, setPhoneModal] = useState<{
+    isOpen: boolean;
+    targetUid: string;
+    targetName: string;
+    phone: string;
+    isSelf: boolean;
+    isCallTrigger?: boolean;
+  }>({
+    isOpen: false,
+    targetUid: '',
+    targetName: '',
+    phone: '',
+    isSelf: false,
+    isCallTrigger: false
+  });
+  const [savingPhone, setSavingPhone] = useState(false);
+  const [phoneError, setPhoneError] = useState('');
+
   // Auto-scroll anchor
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const textInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Auto-focus input when a chat room is opened (opens mobile keyboard)
+  useEffect(() => {
+    if (activeRoom) {
+      const timer = setTimeout(() => {
+        textInputRef.current?.focus();
+      }, 200);
+      return () => clearTimeout(timer);
+    }
+  }, [activeRoom?.id]);
+
+  // Device Notification Permission State
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>(() => {
+    return notificationService.getPermission();
+  });
+
+  const handleRequestNotificationPermission = async () => {
+    const res = await notificationService.requestPermission();
+    setNotificationPermission(res);
+  };
 
   // 1. Sync current user identity to public searchable directory
   useEffect(() => {
@@ -102,6 +172,87 @@ export function ChatHub({
     });
     return () => unsubscribe();
   }, [currentUid, activeRoom?.id]);
+
+  // 3. Subscribe to Real-Time Call History across all devices
+  useEffect(() => {
+    if (!currentUid) return;
+    const unsubscribe = FirestoreService.subscribeToCallHistory((calls) => {
+      setCallHistory(calls);
+    });
+    return () => unsubscribe();
+  }, [currentUid]);
+
+  // Compute Missed Calls Count
+  const missedCallsCount = useMemo(() => {
+    return callHistory.filter(c => c.receiverId === currentUid && (c.status === 'missed' || c.status === 'ringing')).length;
+  }, [callHistory, currentUid]);
+
+  // Filtered Call History List
+  const filteredCalls = useMemo(() => {
+    return callHistory.filter(call => {
+      const isMeCaller = call.callerId === currentUid;
+      const otherName = (isMeCaller ? call.receiverName : call.callerName) || '';
+      const otherPhone = (isMeCaller ? call.receiverPhone : call.callerPhone) || '';
+      const query = callSearchQuery.trim().toLowerCase();
+
+      if (query) {
+        const matchName = otherName.toLowerCase().includes(query);
+        const matchPhone = otherPhone.toLowerCase().includes(query);
+        if (!matchName && !matchPhone) return false;
+      }
+
+      if (callFilter === 'missed') {
+        return call.status === 'missed' || (call.status === 'ringing' && !isMeCaller);
+      }
+      if (callFilter === 'completed') {
+        return call.status === 'completed';
+      }
+      return true;
+    });
+  }, [callHistory, currentUid, callSearchQuery, callFilter]);
+
+  const formatCallTime = (isoString?: string) => {
+    if (!isoString) return '';
+    try {
+      const date = new Date(isoString);
+      const now = new Date();
+      const isToday = date.toDateString() === now.toDateString();
+      const timeStr = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      if (isToday) return `Today, ${timeStr}`;
+      return `${date.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${timeStr}`;
+    } catch {
+      return '';
+    }
+  };
+
+  const handleCallFromHistory = (call: CallSession) => {
+    if (!onStartVoiceCall) return;
+    const isMeCaller = call.callerId === currentUid;
+    const targetUid = isMeCaller ? call.receiverId : call.callerId;
+    const targetName = (isMeCaller ? call.receiverName : call.callerName) || 'User';
+    const targetPhone = (isMeCaller ? call.receiverPhone : call.callerPhone) || '';
+    const targetPhoto = isMeCaller ? call.receiverPhoto : call.callerPhoto;
+
+    onStartVoiceCall({
+      uid: targetUid,
+      name: targetName,
+      phone: targetPhone,
+      photoURL: targetPhoto
+    });
+  };
+
+  const handleChatFromHistory = async (call: CallSession) => {
+    const isMeCaller = call.callerId === currentUid;
+    const targetUser: UserProfile = {
+      id: isMeCaller ? call.receiverId : call.callerId,
+      uid: isMeCaller ? call.receiverId : call.callerId,
+      name: (isMeCaller ? call.receiverName : call.callerName) || 'User',
+      phone: (isMeCaller ? call.receiverPhone : call.callerPhone) || '',
+      photoURL: isMeCaller ? call.receiverPhoto : call.callerPhoto,
+      updatedAt: call.createdAt
+    };
+    await startChatWithUser(targetUser);
+  };
 
   // 3. Handle Direct Incoming chat request (e.g. from customer profile)
   useEffect(() => {
@@ -168,7 +319,7 @@ export function ChatHub({
     return isArchived && !isDeleted;
   });
 
-  const displayedChats = showArchivedView ? archivedChats : activeChats;
+  const displayedChats = viewTab === 'archived' ? archivedChats : activeChats;
 
   // Open / Start Chat with selected User
   const startChatWithUser = async (targetUser: UserProfile) => {
@@ -420,63 +571,189 @@ export function ChatHub({
     };
   };
 
+  const handleOpenPhoneModal = (targetUid: string, targetName: string, currentPhone: string, isSelf: boolean, isCallTrigger = false) => {
+    setPhoneModal({
+      isOpen: true,
+      targetUid,
+      targetName,
+      phone: currentPhone || '',
+      isSelf,
+      isCallTrigger
+    });
+    setPhoneError('');
+  };
+
+  const handleSavePhone = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const digits = phoneModal.phone.replace(/[^0-9]/g, '');
+    if (digits.length < 10) {
+      setPhoneError("Phone number kam az kam 10 ya 11 digits ka hona chahiye (e.g. 03001234567)");
+      return;
+    }
+    setSavingPhone(true);
+    try {
+      if (phoneModal.isSelf) {
+        await FirestoreService.updateUserProfilePhone(phoneModal.phone, phoneModal.targetName);
+      } else if (activeRoom) {
+        await FirestoreService.updateParticipantPhone(activeRoom.id, phoneModal.targetUid, phoneModal.phone, phoneModal.targetName);
+        setActiveRoom(prev => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            participantDetails: {
+              ...prev.participantDetails,
+              [phoneModal.targetUid]: {
+                ...(prev.participantDetails?.[phoneModal.targetUid] || { name: phoneModal.targetName }),
+                phone: phoneModal.phone
+              }
+            }
+          };
+        });
+      }
+
+      const wasCallTrigger = phoneModal.isCallTrigger;
+      const targetUid = phoneModal.targetUid;
+      const targetName = phoneModal.targetName;
+      const updatedPhone = phoneModal.phone;
+
+      setPhoneModal(prev => ({ ...prev, isOpen: false }));
+
+      if (wasCallTrigger && onStartVoiceCall && activeRoom) {
+        const other = getOtherParticipant(activeRoom);
+        const otherUid = activeRoom.participants.find(p => p !== currentUid) || targetUid;
+        onStartVoiceCall({
+          uid: otherUid,
+          name: other.name || targetName,
+          phone: updatedPhone,
+          photoURL: other.photoURL
+        });
+      }
+    } catch (err) {
+      console.error("Save phone err:", err);
+      setPhoneError("Number save nahi ho saka. Dobara koshish karein.");
+    } finally {
+      setSavingPhone(false);
+    }
+  };
+
+  const handleInitiateVoiceCall = () => {
+    if (!activeRoom) return;
+    const other = getOtherParticipant(activeRoom);
+    const otherUid = activeRoom.participants.find(p => p !== currentUid) || '';
+
+    // Check if caller has valid 10/11 digit mobile number
+    if (!isValidPhone(settings.phone)) {
+      handleOpenPhoneModal(currentUid || '', settings.name || 'My Profile', settings.phone || '', true, true);
+      return;
+    }
+
+    // Check if receiver has valid 10/11 digit mobile number
+    if (!isValidPhone(other.phone)) {
+      handleOpenPhoneModal(otherUid, other.name, other.phone || '', false, true);
+      return;
+    }
+
+    onStartVoiceCall?.({
+      uid: otherUid,
+      name: other.name,
+      phone: other.phone,
+      photoURL: other.photoURL
+    });
+  };
+
   return (
-    <div className="flex flex-col h-[calc(100vh-95px)] md:h-[calc(100vh-120px)] bg-slate-100 dark:bg-slate-900 rounded-3xl overflow-hidden shadow-2xl border border-slate-200 dark:border-slate-800">
+    <div className="flex flex-col h-full bg-slate-100 dark:bg-slate-900 rounded-none md:rounded-3xl overflow-hidden shadow-2xl border-0 md:border border-slate-200 dark:border-slate-800">
       <div className="flex h-full w-full relative">
         {/* Left / Main Sidebar: Chats list, Archive and Search */}
         <div className={cn(
           "w-full md:w-80 lg:w-96 flex flex-col bg-white dark:bg-slate-800 border-r border-slate-200 dark:border-slate-700 h-full",
           activeRoom ? "hidden md:flex" : "flex"
         )}>
-          {/* Header with Archive section in Top Left */}
-          <div className={cn(
-            "p-3.5 text-white flex items-center justify-between shadow-md transition-colors",
-            showArchivedView ? "bg-slate-800" : "bg-emerald-700"
-          )}>
-            <div className="flex items-center gap-2">
-              {showArchivedView ? (
-                <>
-                  <button 
-                    onClick={() => setShowArchivedView(false)}
-                    className="p-1.5 bg-slate-700 hover:bg-slate-600 rounded-xl text-white transition-colors"
-                    title="Back to All Chats"
-                  >
-                    <ArrowLeft size={18} />
-                  </button>
-                  <h2 className="text-base font-black tracking-tight flex items-center gap-1.5">
-                    <Archive size={18} className="text-emerald-400" />
-                    Archived Chats ({archivedChats.length})
-                  </h2>
-                </>
-              ) : (
-                <>
-                  {/* Top Left Archive Button */}
-                  <button
-                    onClick={() => setShowArchivedView(true)}
-                    className="flex items-center gap-1.5 px-2.5 py-1.5 bg-emerald-800 hover:bg-emerald-900 active:scale-95 rounded-xl text-xs font-bold text-emerald-100 transition-all shadow-sm"
-                    title="Archived Chats"
-                  >
-                    <Archive size={14} className="text-emerald-300" />
-                    <span>Archived</span>
-                    {archivedChats.length > 0 && (
-                      <span className="ml-0.5 px-1.5 py-0.2 bg-emerald-400 text-emerald-950 rounded-full text-[10px] font-black">
-                        {archivedChats.length}
-                      </span>
-                    )}
-                  </button>
+          {/* Header with 3 Tabs: Archived, Chats, and Calls */}
+          <div className="p-3 bg-emerald-700 dark:bg-slate-800 text-white flex items-center justify-between shadow-md transition-colors gap-2">
+            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 min-w-0">
+              {/* 1. Archived Tab */}
+              <button
+                type="button"
+                onClick={() => setViewTab('archived')}
+                className={cn(
+                  "flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 active:scale-95 shadow-sm",
+                  viewTab === 'archived'
+                    ? "bg-white text-slate-900 font-black shadow"
+                    : "bg-emerald-800/90 dark:bg-slate-700 hover:bg-emerald-900 text-emerald-100"
+                )}
+                title="Archived Chats"
+              >
+                <Archive size={14} className={viewTab === 'archived' ? "text-slate-800" : "text-emerald-300"} />
+                <span>Archived</span>
+                {archivedChats.length > 0 && (
+                  <span className={cn(
+                    "px-1.5 py-0.2 rounded-full text-[10px] font-black",
+                    viewTab === 'archived' ? "bg-slate-800 text-white" : "bg-emerald-400 text-emerald-950"
+                  )}>
+                    {archivedChats.length}
+                  </span>
+                )}
+              </button>
 
-                  <h2 className="text-base font-black tracking-tight flex items-center gap-1.5 ml-1">
-                    <MessageSquare size={18} className="text-emerald-300" />
-                    Chats
-                  </h2>
-                </>
-              )}
+              {/* 2. Chats Tab */}
+              <button
+                type="button"
+                onClick={() => setViewTab('chats')}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 active:scale-95 shadow-sm",
+                  viewTab === 'chats'
+                    ? "bg-white text-emerald-900 font-black shadow"
+                    : "bg-emerald-800/90 dark:bg-slate-700 hover:bg-emerald-900 text-emerald-100"
+                )}
+                title="All Chats"
+              >
+                <MessageSquare size={14} className={viewTab === 'chats' ? "text-emerald-700" : "text-emerald-300"} />
+                <span>Chats</span>
+                {activeChats.length > 0 && (
+                  <span className={cn(
+                    "px-1.5 py-0.2 rounded-full text-[10px] font-black",
+                    viewTab === 'chats' ? "bg-emerald-100 text-emerald-900" : "bg-emerald-900 text-emerald-200"
+                  )}>
+                    {activeChats.length}
+                  </span>
+                )}
+              </button>
+
+              {/* 3. Calls Tab (User requested on right) */}
+              <button
+                type="button"
+                onClick={() => setViewTab('calls')}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 active:scale-95 shadow-sm",
+                  viewTab === 'calls'
+                    ? "bg-white text-emerald-900 font-black shadow"
+                    : "bg-emerald-800/90 dark:bg-slate-700 hover:bg-emerald-900 text-emerald-100"
+                )}
+                title="Call History"
+              >
+                <Phone size={14} className={viewTab === 'calls' ? "text-emerald-700" : "text-emerald-300"} />
+                <span>Calls</span>
+                {missedCallsCount > 0 ? (
+                  <span className="px-1.5 py-0.2 bg-rose-500 text-white rounded-full text-[10px] font-black animate-pulse shadow-sm">
+                    {missedCallsCount}
+                  </span>
+                ) : callHistory.length > 0 ? (
+                  <span className={cn(
+                    "px-1.5 py-0.2 rounded-full text-[10px] font-black",
+                    viewTab === 'calls' ? "bg-emerald-100 text-emerald-900" : "bg-emerald-900 text-emerald-200"
+                  )}>
+                    {callHistory.length}
+                  </span>
+                ) : null}
+              </button>
             </div>
 
             {onClose && (
               <button 
+                type="button"
                 onClick={onClose} 
-                className="p-2 bg-emerald-800 hover:bg-emerald-900 rounded-xl text-white transition-colors"
+                className="p-1.5 bg-emerald-800/90 hover:bg-emerald-900 rounded-xl text-white transition-colors shrink-0"
                 title="Wapis"
               >
                 <ArrowLeft size={18} />
@@ -484,233 +761,453 @@ export function ChatHub({
             )}
           </div>
 
-          {/* Search Bar: Only explicit phone search (Privacy Protected) */}
-          {!showArchivedView && (
-            <div className="p-3 bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700">
-              <div className="relative">
-                <input
-                  type="tel"
-                  placeholder="Mobile number likhein (e.g. 0321...)..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-9 pr-8 py-2.5 bg-white dark:bg-slate-700 text-xs font-bold rounded-2xl border border-slate-200 dark:border-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-slate-800 dark:text-white"
-                />
-                <Search size={16} className="absolute left-3 top-3 text-slate-400" />
-                {searchQuery && (
-                  <button 
-                    onClick={() => setSearchQuery('')}
-                    className="absolute right-3 top-2.5 text-xs text-slate-400 hover:text-slate-600"
+          {/* Device Call & Chat Notification Enable Banner */}
+          {notificationPermission === 'default' && (
+            <div className="bg-gradient-to-r from-amber-500 to-amber-600 text-white px-3 py-2 flex items-center justify-between text-xs font-bold shadow-sm">
+              <div className="flex items-center gap-2 min-w-0 pr-2">
+                <Bell size={15} className="animate-bounce shrink-0" />
+                <span className="text-[11px] font-bold truncate">Call & Message Alerts</span>
+              </div>
+              <button
+                type="button"
+                onClick={handleRequestNotificationPermission}
+                className="shrink-0 bg-white text-amber-800 px-2.5 py-1 rounded-lg font-black text-[10px] shadow hover:bg-amber-50 active:scale-95 transition-transform"
+              >
+                Allow
+              </button>
+            </div>
+          )}
+
+          {/* Caller Phone Setup Warning Banner if Missing/Incomplete */}
+          {!isValidPhone(settings.phone) && (
+            <div className="bg-gradient-to-r from-amber-600 to-amber-700 text-white px-3 py-2.5 flex items-center justify-between text-xs font-bold shadow-sm border-b border-amber-800">
+              <div className="flex items-center gap-2 min-w-0 pr-2">
+                <AlertCircle size={16} className="text-amber-200 shrink-0 animate-pulse" />
+                <div className="min-w-0">
+                  <p className="text-[11px] font-black leading-tight truncate">Apna Mobile Number Register Karein</p>
+                  <p className="text-[9px] text-amber-150 opacity-90 truncate">Call & Chat ke liye 11-digit number zaroori hai</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleOpenPhoneModal(currentUid || '', settings.name || 'My Profile', settings.phone || '', true)}
+                className="shrink-0 bg-white text-amber-900 px-2.5 py-1 rounded-lg font-black text-[10px] shadow hover:bg-amber-50 active:scale-95 transition-transform"
+              >
+                Add Number
+              </button>
+            </div>
+          )}
+
+          {/* VIEW TAB 1: CALLS HISTORY VIEW */}
+          {viewTab === 'calls' && (
+            <div className="flex-1 flex flex-col overflow-hidden bg-slate-50 dark:bg-slate-900">
+              {/* Calls Search and Filters */}
+              <div className="p-3 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 space-y-2.5">
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Call history search karein (Naam ya number)..."
+                    value={callSearchQuery}
+                    onChange={(e) => setCallSearchQuery(e.target.value)}
+                    className="w-full pl-9 pr-8 py-2 bg-slate-100 dark:bg-slate-700 text-xs font-bold rounded-2xl border-none focus:ring-2 focus:ring-emerald-500 text-slate-800 dark:text-white"
+                  />
+                  <Search size={15} className="absolute left-3 top-2.5 text-slate-400" />
+                  {callSearchQuery && (
+                    <button 
+                      onClick={() => setCallSearchQuery('')}
+                      className="absolute right-3 top-2 text-xs text-slate-400 hover:text-slate-600"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+
+                {/* Filter Chips */}
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setCallFilter('all')}
+                    className={cn(
+                      "px-2.5 py-1 rounded-xl text-[11px] font-black transition-all",
+                      callFilter === 'all'
+                        ? "bg-emerald-600 text-white shadow-sm"
+                        : "bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200"
+                    )}
                   >
-                    ✕
+                    All ({callHistory.length})
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setCallFilter('missed')}
+                    className={cn(
+                      "px-2.5 py-1 rounded-xl text-[11px] font-black transition-all flex items-center gap-1",
+                      callFilter === 'missed'
+                        ? "bg-rose-600 text-white shadow-sm"
+                        : "bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 hover:bg-rose-100"
+                    )}
+                  >
+                    <PhoneMissed size={11} /> Missed ({missedCallsCount})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCallFilter('completed')}
+                    className={cn(
+                      "px-2.5 py-1 rounded-xl text-[11px] font-black transition-all flex items-center gap-1",
+                      callFilter === 'completed'
+                        ? "bg-emerald-700 text-white shadow-sm"
+                        : "bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200"
+                    )}
+                  >
+                    <PhoneIncoming size={11} /> Answered
+                  </button>
+                </div>
+              </div>
+
+              {/* Calls List */}
+              <div className="flex-1 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-700/60 bg-white dark:bg-slate-800">
+                {filteredCalls.length === 0 ? (
+                  <div className="p-8 text-center flex flex-col items-center justify-center text-slate-400 h-full">
+                    <div className="w-16 h-16 rounded-3xl bg-emerald-50 dark:bg-slate-700 flex items-center justify-center text-emerald-600 mb-3 shadow-inner">
+                      <PhoneCall size={26} />
+                    </div>
+                    <h4 className="font-bold text-sm text-slate-700 dark:text-slate-200">
+                      Koi call history nahi hai
+                    </h4>
+                    <p className="text-xs text-slate-400 mt-1 max-w-[220px]">
+                      {callFilter === 'missed' 
+                        ? 'Aap ki koi missed call nahi hai.' 
+                        : 'Chats mein se kisi bhi user ko voice call karein, saari history yahan record hogi.'}
+                    </p>
+                  </div>
+                ) : (
+                  filteredCalls.map((call) => {
+                    const isMeCaller = call.callerId === currentUid;
+                    const otherName = (isMeCaller ? call.receiverName : call.callerName) || 'User';
+                    const otherPhone = (isMeCaller ? call.receiverPhone : call.callerPhone) || '';
+                    const otherPhoto = isMeCaller ? call.receiverPhoto : call.callerPhoto;
+                    const isMissed = call.status === 'missed' || (call.status === 'ringing' && !isMeCaller);
+                    const isDeclined = call.status === 'rejected' || call.status === 'busy';
+
+                    const mins = call.duration ? Math.floor(call.duration / 60) : 0;
+                    const secs = call.duration ? call.duration % 60 : 0;
+                    const durationText = call.duration 
+                      ? (mins > 0 ? `${mins}m ${secs}s` : `${secs}s`) 
+                      : null;
+
+                    return (
+                      <div 
+                        key={call.id}
+                        className="p-3.5 flex items-center justify-between gap-3 hover:bg-slate-50 dark:hover:bg-slate-700/40 transition-colors bg-white dark:bg-slate-800"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          {otherPhoto ? (
+                            <img src={otherPhoto} alt={otherName} className="w-11 h-11 rounded-2xl object-cover shadow border border-slate-200 dark:border-slate-700 shrink-0" />
+                          ) : (
+                            <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white font-black flex items-center justify-center shadow text-sm shrink-0">
+                              {otherName.charAt(0).toUpperCase()}
+                            </div>
+                          )}
+
+                          <div className="min-w-0">
+                            <p className="text-xs font-black text-slate-800 dark:text-white truncate">
+                              {otherName}
+                            </p>
+                            
+                            <div className="flex items-center gap-1.5 text-[11px] font-bold mt-0.5">
+                              {isMeCaller ? (
+                                <span className="text-blue-600 dark:text-blue-400 flex items-center gap-1 font-black">
+                                  <PhoneOutgoing size={12} className="shrink-0" /> Outgoing
+                                </span>
+                              ) : isMissed ? (
+                                <span className="text-rose-500 dark:text-rose-400 flex items-center gap-1 font-black">
+                                  <PhoneMissed size={12} className="shrink-0" /> Missed call
+                                </span>
+                              ) : isDeclined ? (
+                                <span className="text-amber-500 flex items-center gap-1 font-black">
+                                  <PhoneMissed size={12} className="shrink-0" /> Declined
+                                </span>
+                              ) : (
+                                <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1 font-black">
+                                  <PhoneIncoming size={12} className="shrink-0" /> Incoming
+                                </span>
+                              )}
+
+                              {durationText && (
+                                <>
+                                  <span className="text-slate-300 dark:text-slate-600">•</span>
+                                  <span className="text-[10px] text-slate-500 dark:text-slate-400">{durationText}</span>
+                                </>
+                              )}
+
+                              <span className="text-slate-300 dark:text-slate-600">•</span>
+                              <span className="text-[10px] text-slate-400 font-medium whitespace-nowrap">{formatCallTime(call.createdAt)}</span>
+                            </div>
+
+                            {otherPhone && (
+                              <p className="text-[10px] text-slate-400 font-semibold truncate mt-0.5">{otherPhone}</p>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Quick Action Buttons */}
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleChatFromHistory(call)}
+                            className="p-2 bg-slate-100 dark:bg-slate-700 hover:bg-emerald-100 dark:hover:bg-emerald-950 text-slate-600 dark:text-slate-200 hover:text-emerald-700 rounded-xl transition-all active:scale-95 shadow-sm"
+                            title="Open Chat"
+                          >
+                            <MessageSquare size={16} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleCallFromHistory(call)}
+                            className="p-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl transition-all active:scale-95 shadow-md shadow-emerald-600/30"
+                            title="Call Now"
+                          >
+                            <Phone size={16} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
                 )}
               </div>
             </div>
           )}
 
-          {/* Search Results Display */}
-          {searchQuery.trim().length >= 2 && !showArchivedView && (
-            <div className="bg-emerald-50/90 dark:bg-slate-700/80 p-2.5 border-b border-emerald-100 dark:border-slate-600 shadow-inner">
-              <p className="text-[10px] font-black text-emerald-800 dark:text-emerald-300 uppercase tracking-wider px-1 py-1">
-                🔍 Search Result:
-              </p>
-              {isSearching ? (
-                <div className="flex items-center gap-2 p-3 text-xs text-emerald-700 font-bold">
-                  <Loader2 size={16} className="animate-spin" /> Number dhoond rahe hain...
-                </div>
-              ) : searchResults.length === 0 ? (
-                <div className="p-4 bg-white dark:bg-slate-800 rounded-2xl border border-rose-200 dark:border-rose-900/40 text-center shadow-sm">
-                  <div className="w-8 h-8 rounded-full bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center mx-auto mb-1 font-black text-xs">
-                    ✕
-                  </div>
-                  <p className="text-xs font-black text-rose-600 dark:text-rose-400">
-                    User not available
-                  </p>
-                  <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 font-medium">
-                    Yeh number "{searchQuery}" Dukaan app par registered nahi hai.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-1.5">
-                  {searchResults.map((u) => (
-                    <div
-                      key={u.uid}
-                      onClick={() => startChatWithUser(u)}
-                      className="cursor-pointer w-full flex items-center justify-between p-2.5 rounded-2xl bg-white dark:bg-slate-800 hover:bg-emerald-100 dark:hover:bg-emerald-950/50 transition-all text-left shadow-sm active:scale-98"
-                    >
-                      <div className="flex items-center gap-2.5">
-                        {u.photoURL ? (
-                          <img src={u.photoURL} alt={u.name} className="w-10 h-10 rounded-2xl object-cover shadow border border-slate-200 dark:border-slate-700" />
-                        ) : (
-                          <div className="w-10 h-10 rounded-2xl bg-emerald-600 text-white font-black flex items-center justify-center text-xs shadow">
-                            {u.name.charAt(0).toUpperCase()}
-                          </div>
-                        )}
-                        <div>
-                          <p className="text-xs font-black text-slate-800 dark:text-white">{u.name}</p>
-                          <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">{u.phone}</p>
-                        </div>
-                      </div>
+          {/* VIEW TAB 2 & 3: CHATS & ARCHIVED VIEW */}
+          {viewTab !== 'calls' && (
+            <>
+              {/* Search Bar: Only explicit phone search (Privacy Protected) */}
+              {viewTab === 'chats' && (
+                <div className="p-3 bg-slate-50 dark:bg-slate-800/80 border-b border-slate-200 dark:border-slate-700">
+                  <div className="relative">
+                    <input
+                      type="tel"
+                      placeholder="Mobile number likhein (e.g. 0321...)..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full pl-9 pr-8 py-2.5 bg-white dark:bg-slate-700 text-xs font-bold rounded-2xl border border-slate-200 dark:border-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-slate-800 dark:text-white"
+                    />
+                    <Search size={16} className="absolute left-3 top-3 text-slate-400" />
+                    {searchQuery && (
                       <button 
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          startChatWithUser(u);
-                        }}
-                        className="text-xs bg-emerald-600 text-white font-black px-3 py-1.5 rounded-xl hover:bg-emerald-700 shadow"
+                        onClick={() => setSearchQuery('')}
+                        className="absolute right-3 top-2.5 text-xs text-slate-400 hover:text-slate-600"
                       >
-                        Chat
+                        ✕
                       </button>
-                    </div>
-                  ))}
+                    )}
+                  </div>
                 </div>
               )}
-            </div>
-          )}
 
-          {/* Chats List (Swipe left to reveal Delete & Archive) */}
-          <div className="flex-1 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-700">
-            {displayedChats.length === 0 && !searchQuery ? (
-              <div className="p-8 text-center flex flex-col items-center justify-center text-slate-400 h-full">
-                <div className="w-16 h-16 rounded-3xl bg-emerald-50 dark:bg-slate-700 flex items-center justify-center text-emerald-600 mb-3 shadow-inner">
-                  {showArchivedView ? <Archive size={24} /> : <Phone size={24} />}
+              {/* Search Results Display */}
+              {searchQuery.trim().length >= 2 && viewTab === 'chats' && (
+                <div className="bg-emerald-50/90 dark:bg-slate-700/80 p-2.5 border-b border-emerald-100 dark:border-slate-600 shadow-inner">
+                  <p className="text-[10px] font-black text-emerald-800 dark:text-emerald-300 uppercase tracking-wider px-1 py-1">
+                    🔍 Search Result:
+                  </p>
+                  {isSearching ? (
+                    <div className="flex items-center gap-2 p-3 text-xs text-emerald-700 font-bold">
+                      <Loader2 size={16} className="animate-spin" /> Number dhoond rahe hain...
+                    </div>
+                  ) : searchResults.length === 0 ? (
+                    <div className="p-4 bg-white dark:bg-slate-800 rounded-2xl border border-rose-200 dark:border-rose-900/40 text-center shadow-sm">
+                      <div className="w-8 h-8 rounded-full bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center mx-auto mb-1 font-black text-xs">
+                        ✕
+                      </div>
+                      <p className="text-xs font-black text-rose-600 dark:text-rose-400">
+                        User not available
+                      </p>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5 font-medium">
+                        Yeh number "{searchQuery}" Dukaan app par registered nahi hai.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {searchResults.map((u) => (
+                        <div
+                          key={u.uid}
+                          onClick={() => startChatWithUser(u)}
+                          className="cursor-pointer w-full flex items-center justify-between p-2.5 rounded-2xl bg-white dark:bg-slate-800 hover:bg-emerald-100 dark:hover:bg-emerald-950/50 transition-all text-left shadow-sm active:scale-98"
+                        >
+                          <div className="flex items-center gap-2.5">
+                            {u.photoURL ? (
+                              <img src={u.photoURL} alt={u.name} className="w-10 h-10 rounded-2xl object-cover shadow border border-slate-200 dark:border-slate-700" />
+                            ) : (
+                              <div className="w-10 h-10 rounded-2xl bg-emerald-600 text-white font-black flex items-center justify-center text-xs shadow">
+                                {u.name.charAt(0).toUpperCase()}
+                              </div>
+                            )}
+                            <div>
+                              <p className="text-xs font-black text-slate-800 dark:text-white">{u.name}</p>
+                              <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">{u.phone}</p>
+                            </div>
+                          </div>
+                          <button 
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              startChatWithUser(u);
+                            }}
+                            className="text-xs bg-emerald-600 text-white font-black px-3 py-1.5 rounded-xl hover:bg-emerald-700 shadow"
+                          >
+                            Chat
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <h4 className="font-bold text-sm text-slate-700 dark:text-slate-200">
-                  {showArchivedView ? 'Koi archived chat nahi hai' : 'Abhi koi chat nahi hai'}
-                </h4>
-                <p className="text-xs text-slate-400 mt-1 max-w-[220px]">
-                  {showArchivedView 
-                    ? 'Kisi bhi chat ko swipe left kar ke yahan archive kar saktay hain.' 
-                    : 'Kisi se baat karne ke liye upar search bar main unka Mobile Number likhein.'}
-                </p>
-                {!showArchivedView && (
-                  <div className="mt-4 px-3 py-2 bg-slate-50 dark:bg-slate-700/40 rounded-xl text-[10px] text-slate-500 font-medium">
-                    👉 Tip: Chat ko swipe left karein Archive ya Delete karne ke liye.
+              )}
+
+              {/* Chats List (Swipe left to reveal Delete & Archive) */}
+              <div className="flex-1 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-700">
+                {displayedChats.length === 0 && !searchQuery ? (
+                  <div className="p-8 text-center flex flex-col items-center justify-center text-slate-400 h-full">
+                    <div className="w-16 h-16 rounded-3xl bg-emerald-50 dark:bg-slate-700 flex items-center justify-center text-emerald-600 mb-3 shadow-inner">
+                      {viewTab === 'archived' ? <Archive size={24} /> : <MessageSquare size={24} />}
+                    </div>
+                    <h4 className="font-bold text-sm text-slate-700 dark:text-slate-200">
+                      {viewTab === 'archived' ? 'Koi archived chat nahi hai' : 'Abhi koi chat nahi hai'}
+                    </h4>
+                    <p className="text-xs text-slate-400 mt-1 max-w-[220px]">
+                      {viewTab === 'archived' 
+                        ? 'Kisi bhi chat ko swipe left kar ke yahan archive kar saktay hain.' 
+                        : 'Kisi se baat karne ke liye upar search bar main unka Mobile Number likhein.'}
+                    </p>
+                    {viewTab === 'chats' && (
+                      <div className="mt-4 px-3 py-2 bg-slate-50 dark:bg-slate-700/40 rounded-xl text-[10px] text-slate-500 font-medium">
+                        👉 Tip: Chat ko swipe left karein Archive ya Delete karne ke liye.
+                      </div>
+                    )}
                   </div>
+                ) : (
+                  displayedChats.map((room) => {
+                    const other = getOtherParticipant(room);
+                    const isSelected = activeRoom?.id === room.id;
+                    const isSwiped = swipedRoomId === room.id;
+                    const isArchived = currentUid ? room.archivedBy?.includes(currentUid) : false;
+
+                    return (
+                      <div 
+                        key={room.id}
+                        className="relative overflow-hidden group select-none bg-white dark:bg-slate-800"
+                        onTouchStart={(e) => {
+                          touchStartRef.current = e.touches[0].clientX;
+                        }}
+                        onTouchMove={(e) => {
+                          if (touchStartRef.current === null) return;
+                          const diffX = touchStartRef.current - e.touches[0].clientX;
+                          if (diffX > 45) {
+                            setSwipedRoomId(room.id);
+                          } else if (diffX < -45) {
+                            setSwipedRoomId(null);
+                          }
+                        }}
+                      >
+                        {/* Underlying Action Buttons (Revealed on Swipe) */}
+                        <div className="absolute inset-y-0 right-0 flex items-stretch z-0">
+                          <button
+                            onClick={(e) => handleToggleArchive(e, room.id)}
+                            className="px-4 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs flex flex-col items-center justify-center gap-1 transition-colors"
+                            title={isArchived ? "Unarchive" : "Archive"}
+                          >
+                            {isArchived ? <ArchiveRestore size={18} /> : <Archive size={18} />}
+                            <span className="text-[9px]">{isArchived ? "Unarchive" : "Archive"}</span>
+                          </button>
+                          <button
+                            onClick={(e) => handleDeleteChat(e, room.id)}
+                            className="px-4 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs flex flex-col items-center justify-center gap-1 transition-colors"
+                            title="Delete Chat"
+                          >
+                            <Trash2 size={18} />
+                            <span className="text-[9px]">Delete</span>
+                          </button>
+                        </div>
+
+                        {/* Chat Card Foreground */}
+                        <div
+                          onClick={() => {
+                            if (isSwiped) {
+                              setSwipedRoomId(null);
+                            } else {
+                              setActiveRoom(room);
+                            }
+                          }}
+                          className={cn(
+                            "relative z-10 w-full p-3.5 flex items-center gap-3 text-left transition-transform duration-200 ease-out bg-white dark:bg-slate-800 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50",
+                            isSwiped ? "-translate-x-32" : "translate-x-0",
+                            isSelected && "bg-emerald-50 dark:bg-emerald-950/40 border-l-4 border-emerald-600"
+                          )}
+                        >
+                          {other.photoURL ? (
+                            <img src={other.photoURL} alt={other.name} className="w-11 h-11 rounded-2xl object-cover shadow border border-slate-200 dark:border-slate-700 shrink-0" />
+                          ) : (
+                            <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white font-black flex items-center justify-center shadow text-sm shrink-0">
+                              {other.name.charAt(0).toUpperCase()}
+                            </div>
+                          )}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between">
+                              <p className="text-xs font-black text-slate-800 dark:text-white truncate">
+                                {other.name}
+                              </p>
+                              <span className="text-[9px] text-slate-400 font-bold whitespace-nowrap">
+                                {new Date(room.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-slate-400 truncate mt-0.5 font-medium flex items-center gap-1">
+                              {room.lastMessageType === 'voice' && <Mic size={12} className="text-emerald-500 inline shrink-0" />}
+                              {room.lastMessageType === 'image' && <ImageIcon size={12} className="text-emerald-500 inline shrink-0" />}
+                              {room.lastMessageType === 'call' && (
+                                room.lastMessageCallStatus === 'missed' ? (
+                                  <span className="text-rose-500 dark:text-rose-400 font-bold flex items-center gap-1">
+                                    <PhoneMissed size={12} className="shrink-0" /> Missed call
+                                  </span>
+                                ) : room.lastMessageCallStatus === 'rejected' ? (
+                                  <span className="text-amber-500 font-bold flex items-center gap-1">
+                                    <PhoneMissed size={12} className="shrink-0" /> Declined call
+                                  </span>
+                                ) : (
+                                  <span className="text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1">
+                                    <PhoneIncoming size={12} className="shrink-0" /> {room.lastMessageText || 'Voice call'}
+                                  </span>
+                                )
+                              )}
+                              {room.lastMessageType !== 'call' && (
+                                <span className="truncate">{room.lastMessageText || 'Tap to chat'}</span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Desktop Quick Hover Actions */}
+                          <div className="hidden md:flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity pl-1">
+                            <button
+                              onClick={(e) => handleToggleArchive(e, room.id)}
+                              className="p-1.5 hover:bg-amber-100 dark:hover:bg-amber-950/50 text-amber-600 rounded-lg transition-colors"
+                              title={isArchived ? "Unarchive" : "Archive"}
+                            >
+                              {isArchived ? <ArchiveRestore size={15} /> : <Archive size={15} />}
+                            </button>
+                            <button
+                              onClick={(e) => handleDeleteChat(e, room.id)}
+                              className="p-1.5 hover:bg-rose-100 dark:hover:bg-rose-950/50 text-rose-600 rounded-lg transition-colors"
+                              title="Delete Chat"
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
                 )}
               </div>
-            ) : (
-              displayedChats.map((room) => {
-                const other = getOtherParticipant(room);
-                const isSelected = activeRoom?.id === room.id;
-                const isSwiped = swipedRoomId === room.id;
-                const isArchived = currentUid ? room.archivedBy?.includes(currentUid) : false;
-
-                return (
-                  <div 
-                    key={room.id}
-                    className="relative overflow-hidden group select-none bg-white dark:bg-slate-800"
-                    onTouchStart={(e) => {
-                      touchStartRef.current = e.touches[0].clientX;
-                    }}
-                    onTouchMove={(e) => {
-                      if (touchStartRef.current === null) return;
-                      const diffX = touchStartRef.current - e.touches[0].clientX;
-                      if (diffX > 45) {
-                        setSwipedRoomId(room.id);
-                      } else if (diffX < -45) {
-                        setSwipedRoomId(null);
-                      }
-                    }}
-                  >
-                    {/* Underlying Action Buttons (Revealed on Swipe) */}
-                    <div className="absolute inset-y-0 right-0 flex items-stretch z-0">
-                      <button
-                        onClick={(e) => handleToggleArchive(e, room.id)}
-                        className="px-4 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs flex flex-col items-center justify-center gap-1 transition-colors"
-                        title={isArchived ? "Unarchive" : "Archive"}
-                      >
-                        {isArchived ? <ArchiveRestore size={18} /> : <Archive size={18} />}
-                        <span className="text-[9px]">{isArchived ? "Unarchive" : "Archive"}</span>
-                      </button>
-                      <button
-                        onClick={(e) => handleDeleteChat(e, room.id)}
-                        className="px-4 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs flex flex-col items-center justify-center gap-1 transition-colors"
-                        title="Delete Chat"
-                      >
-                        <Trash2 size={18} />
-                        <span className="text-[9px]">Delete</span>
-                      </button>
-                    </div>
-
-                    {/* Chat Card Foreground */}
-                    <div
-                      onClick={() => {
-                        if (isSwiped) {
-                          setSwipedRoomId(null);
-                        } else {
-                          setActiveRoom(room);
-                        }
-                      }}
-                      className={cn(
-                        "relative z-10 w-full p-3.5 flex items-center gap-3 text-left transition-transform duration-200 ease-out bg-white dark:bg-slate-800 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50",
-                        isSwiped ? "-translate-x-32" : "translate-x-0",
-                        isSelected && "bg-emerald-50 dark:bg-emerald-950/40 border-l-4 border-emerald-600"
-                      )}
-                    >
-                      {other.photoURL ? (
-                        <img src={other.photoURL} alt={other.name} className="w-11 h-11 rounded-2xl object-cover shadow border border-slate-200 dark:border-slate-700 shrink-0" />
-                      ) : (
-                        <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white font-black flex items-center justify-center shadow text-sm shrink-0">
-                          {other.name.charAt(0).toUpperCase()}
-                        </div>
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between">
-                          <p className="text-xs font-black text-slate-800 dark:text-white truncate">
-                            {other.name}
-                          </p>
-                          <span className="text-[9px] text-slate-400 font-bold whitespace-nowrap">
-                            {new Date(room.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                        </div>
-                        <div className="text-[11px] text-slate-400 truncate mt-0.5 font-medium flex items-center gap-1">
-                          {room.lastMessageType === 'voice' && <Mic size={12} className="text-emerald-500 inline shrink-0" />}
-                          {room.lastMessageType === 'image' && <ImageIcon size={12} className="text-emerald-500 inline shrink-0" />}
-                          {room.lastMessageType === 'call' && (
-                            room.lastMessageCallStatus === 'missed' ? (
-                              <span className="text-rose-500 dark:text-rose-400 font-bold flex items-center gap-1">
-                                <PhoneMissed size={12} className="shrink-0" /> Missed call
-                              </span>
-                            ) : room.lastMessageCallStatus === 'rejected' ? (
-                              <span className="text-amber-500 font-bold flex items-center gap-1">
-                                <PhoneMissed size={12} className="shrink-0" /> Declined call
-                              </span>
-                            ) : (
-                              <span className="text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1">
-                                <PhoneIncoming size={12} className="shrink-0" /> {room.lastMessageText || 'Voice call'}
-                              </span>
-                            )
-                          )}
-                          {room.lastMessageType !== 'call' && (
-                            <span className="truncate">{room.lastMessageText || 'Tap to chat'}</span>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Desktop Quick Hover Actions */}
-                      <div className="hidden md:flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity pl-1">
-                        <button
-                          onClick={(e) => handleToggleArchive(e, room.id)}
-                          className="p-1.5 hover:bg-amber-100 dark:hover:bg-amber-950/50 text-amber-600 rounded-lg transition-colors"
-                          title={isArchived ? "Unarchive" : "Archive"}
-                        >
-                          {isArchived ? <ArchiveRestore size={15} /> : <Archive size={15} />}
-                        </button>
-                        <button
-                          onClick={(e) => handleDeleteChat(e, room.id)}
-                          className="p-1.5 hover:bg-rose-100 dark:hover:bg-rose-950/50 text-rose-600 rounded-lg transition-colors"
-                          title="Delete Chat"
-                        >
-                          <Trash2 size={15} />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
+            </>
+          )}
         </div>
 
         {/* Right / Chat Conversation Room */}
@@ -751,28 +1248,51 @@ export function ChatHub({
                     <h3 className="text-sm font-black text-slate-900 dark:text-white leading-tight">
                       {getOtherParticipant(activeRoom).name}
                     </h3>
-                    <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                      {getOtherParticipant(activeRoom).phone || 'Direct Chat'}
-                    </p>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      {isValidPhone(getOtherParticipant(activeRoom).phone) ? (
+                        <div className="flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                          <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">
+                            {formatPhoneDisplay(getOtherParticipant(activeRoom).phone)}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const other = getOtherParticipant(activeRoom);
+                              const otherUid = activeRoom.participants.find(p => p !== currentUid) || '';
+                              handleOpenPhoneModal(otherUid, other.name, other.phone || '', false);
+                            }}
+                            className="text-[9px] text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 font-semibold underline ml-0.5"
+                            title="Edit Phone Number"
+                          >
+                            Edit
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const other = getOtherParticipant(activeRoom);
+                            const otherUid = activeRoom.participants.find(p => p !== currentUid) || '';
+                            handleOpenPhoneModal(otherUid, other.name, other.phone || '', false);
+                          }}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 text-[10px] font-black hover:bg-amber-200 transition-colors shadow-xs"
+                          title="Add full 11-digit mobile number"
+                        >
+                          <AlertCircle size={10} className="text-amber-600 dark:text-amber-400" />
+                          <span>{getOtherParticipant(activeRoom).phone ? `${getOtherParticipant(activeRoom).phone} (Incomplete)` : 'No Number'} • Add Mobile Number</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-1.5">
                   {/* Live WebRTC Internet Voice Call (Works on Website & PC & Mobile) */}
                   <button
-                    onClick={() => {
-                      const other = getOtherParticipant(activeRoom);
-                      const otherUid = activeRoom.participants.find(p => p !== currentUid) || '';
-                      onStartVoiceCall?.({
-                        uid: otherUid,
-                        name: other.name,
-                        phone: other.phone || '',
-                        photoURL: other.photoURL
-                      });
-                    }}
+                    onClick={handleInitiateVoiceCall}
                     className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl transition-all flex items-center gap-1.5 shadow-sm text-xs font-bold"
-                    title="Live Web Voice Call (Website par direct baat karein)"
+                    title="Live Web Voice Call"
                   >
                     <PhoneCall size={15} />
                     <span className="hidden sm:inline">Live Call</span>
@@ -923,14 +1443,7 @@ export function ChatHub({
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    const other = getOtherParticipant(activeRoom);
-                                    const otherUid = activeRoom.participants.find(p => p !== currentUid) || '';
-                                    onStartVoiceCall?.({
-                                      uid: otherUid,
-                                      name: other.name,
-                                      phone: other.phone || '',
-                                      photoURL: other.photoURL
-                                    });
+                                    handleInitiateVoiceCall();
                                   }}
                                   className={cn(
                                     "w-full mt-2.5 py-1.5 px-3 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all shadow-sm active:scale-95",
@@ -969,7 +1482,7 @@ export function ChatHub({
               </div>
 
               {/* Bottom Input Area */}
-              <div className="p-3 bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700">
+              <div className="p-2.5 md:p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-white dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700">
                 {isRecording ? (
                   /* Live Recording View */
                   <div className="flex items-center justify-between bg-rose-50 dark:bg-rose-950/40 p-2.5 rounded-2xl border border-rose-200 dark:border-rose-900 animate-pulse">
@@ -1022,6 +1535,7 @@ export function ChatHub({
                     </button>
 
                     <input
+                      ref={textInputRef}
                       type="text"
                       placeholder="Message likhein..."
                       value={textInput}
@@ -1071,6 +1585,99 @@ export function ChatHub({
             alt="Full Preview" 
             className="max-h-[90vh] max-w-[90vw] object-contain rounded-2xl shadow-2xl" 
           />
+        </div>
+      )}
+
+      {/* Interactive Mobile Number Registration & Update Modal */}
+      {phoneModal.isOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+          <div className="w-full max-w-sm bg-white dark:bg-slate-800 rounded-3xl p-6 shadow-2xl border border-slate-200 dark:border-slate-700 animate-in zoom-in-95">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shadow-inner">
+                  <Phone size={20} />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900 dark:text-white leading-tight">
+                    {phoneModal.isSelf ? 'Apna Mobile Number' : `${phoneModal.targetName} ka Number`}
+                  </h3>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400 font-semibold">
+                    {phoneModal.isCallTrigger ? 'Voice call ke liye zaroori hai' : 'Dukan Pro Chat Directory'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPhoneModal(prev => ({ ...prev, isOpen: false }))}
+                className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-xl"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSavePhone} className="space-y-4">
+              <div>
+                <label className="block text-xs font-black text-slate-700 dark:text-slate-300 mb-1.5">
+                  11-Digit Mobile Number (e.g. 03001234567)
+                </label>
+                <div className="relative">
+                  <input
+                    type="tel"
+                    required
+                    placeholder="03001234567"
+                    value={phoneModal.phone}
+                    onChange={(e) => {
+                      setPhoneModal(prev => ({ ...prev, phone: e.target.value }));
+                      setPhoneError('');
+                    }}
+                    autoFocus
+                    className="w-full px-4 py-3 pl-11 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-2xl text-sm font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                  <div className="absolute left-3.5 top-3 text-base">
+                    📱
+                  </div>
+                  {isValidPhone(phoneModal.phone) && (
+                    <div className="absolute right-3.5 top-3.5 text-emerald-500">
+                      <CheckCircle size={18} />
+                    </div>
+                  )}
+                </div>
+                {phoneError && (
+                  <p className="text-xs text-rose-500 font-bold mt-1.5 flex items-center gap-1">
+                    <AlertCircle size={13} /> {phoneError}
+                  </p>
+                )}
+                <p className="text-[10px] text-slate-400 mt-1.5">
+                  💡 Yeh number Dukan Pro directory mein save hoga taake call history aur search mein mukammal record rahe.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setPhoneModal(prev => ({ ...prev, isOpen: false }))}
+                  className="flex-1 py-3 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 rounded-2xl text-xs font-black transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingPhone}
+                  className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-2xl text-xs font-black shadow-lg shadow-emerald-600/30 flex items-center justify-center gap-1.5 transition-all"
+                >
+                  {savingPhone ? (
+                    <>
+                      <Loader2 size={16} className="animate-spin" /> Saving...
+                    </>
+                  ) : (
+                    <>
+                      {phoneModal.isCallTrigger ? 'Save & Call' : 'Save Number'}
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>
