@@ -5,8 +5,14 @@ import App from './App.tsx';
 import './index.css';
 import { registerSW } from 'virtual:pwa-register';
 
-// Register service worker for PWA
-registerSW({ immediate: true });
+// Register service worker for PWA (skip in cross-origin iframes like AI Studio preview)
+try {
+  if (typeof window !== 'undefined' && 'serviceWorker' in navigator && window.self === window.top) {
+    registerSW({ immediate: true });
+  }
+} catch (e) {
+  console.warn("Service worker registration skipped:", e);
+}
 
 try {
   createRoot(document.getElementById('root')!).render(

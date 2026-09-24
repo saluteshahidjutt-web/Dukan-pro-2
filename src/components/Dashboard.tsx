@@ -1,5 +1,5 @@
 import React from 'react';
-import { TrendingUp, Users, AlertTriangle, Wallet, ArrowUpRight, ArrowDownRight, BarChart3, ShoppingCart, Package, X, Trash2, RefreshCw } from 'lucide-react';
+import { TrendingUp, Users, AlertTriangle, Wallet, ArrowUpRight, ArrowDownRight, BarChart3, ShoppingCart, Package, X, Trash2, RefreshCw, MessageSquare } from 'lucide-react';
 import { Product, Customer, Transaction, ShopSettings, Expense } from '../types';
 import { formatCurrency, cn } from '../lib/utils';
 import { motion } from 'motion/react';
@@ -158,6 +158,15 @@ export function Dashboard({ products, customers, transactions, expenses, setting
             subClass="!text-emerald-100"
             iconClass="!bg-emerald-500/50 !text-white"
           />
+          {settings.chatEnabled !== false && (
+            <ActionButton 
+              label={t.chat || 'Chat Hub'} 
+              sub={t.chat_sub || 'Direct & Voice'} 
+              icon={<MessageSquare size={20} className="text-emerald-600" />} 
+              onClick={() => onNavigate('chat')}
+              className="bg-emerald-50 dark:bg-emerald-950/30 !border-emerald-200 dark:!border-emerald-800/40"
+            />
+          )}
           <ActionButton 
             label="Expenses" 
             sub="Manage Kharcha" 

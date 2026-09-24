@@ -11,10 +11,12 @@ import {
   orderBy, 
   limit,
   onSnapshot,
+  arrayUnion,
+  arrayRemove,
   FirestoreError
 } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from './firebase';
-import { Product, Customer, Transaction, ShopSettings, Expense } from '../types';
+import { Product, Customer, Transaction, ShopSettings, Expense, UserProfile, ChatRoom, ChatMessage } from '../types';
 import { generateId } from './utils';
 
 // Mock storage keys
@@ -384,6 +386,13 @@ export const FirestoreService = {
     if (!userId) return;
     try {
       await setDoc(doc(db, 'settings', userId), { ...settings, ownerId: userId });
+      if (settings.phone) {
+        await FirestoreService.syncUserProfile({
+          name: settings.name || auth.currentUser?.displayName || 'User',
+          phone: settings.phone,
+          photoURL: settings.logoUrl || settings.photoURL || auth.currentUser?.photoURL || ''
+        });
+      }
     } catch (e) {
       handleFirestoreError(e, OperationType.WRITE, `settings/${auth.currentUser?.uid}`);
     }
@@ -641,6 +650,374 @@ export const FirestoreService = {
         } catch (err) {
           console.error("Snapshot error handled", err);
         }
+      }
+    );
+  },
+
+  // --- User Profiles for Chat Search ---
+  syncUserProfile: async (profile: { name: string; phone: string; photoURL?: string }) => {
+    const user = auth.currentUser;
+    if (!user) return;
+    try {
+      const cleanedPhone = profile.phone.replace(/[\s\-\+]/g, '');
+      const userDoc: UserProfile = {
+        id: user.uid,
+        uid: user.uid,
+        name: profile.name,
+        phone: cleanedPhone,
+        photoURL: profile.photoURL || user.photoURL || '',
+        status: 'Hey there! I am using Dukaan Pro Chat',
+        updatedAt: new Date().toISOString()
+      };
+      await setDoc(doc(db, 'users', user.uid), userDoc);
+    } catch (e) {
+      console.warn("UserProfile sync skipped or offline:", e);
+    }
+  },
+
+  searchUserByPhone: async (phoneInput: string): Promise<UserProfile[]> => {
+    if (!phoneInput || phoneInput.trim().length < 2) return [];
+    const clean = phoneInput.replace(/[\s\-\+]/g, '');
+    try {
+      const usersRef = collection(db, 'users');
+      // Search with prefix
+      const q = query(usersRef, where('phone', '>=', clean), where('phone', '<=', clean + '\uf8ff'), limit(15));
+      const snap = await getDocs(q);
+      const results: UserProfile[] = [];
+      snap.forEach(docSnap => {
+        const u = docSnap.data() as UserProfile;
+        if (u.uid !== auth.currentUser?.uid) {
+          results.push(u);
+        }
+      });
+
+      // If user typed e.g. "0321..." but database stored without leading 0 (e.g. "321...")
+      if (clean.startsWith('0') && results.length === 0) {
+        const withoutZero = clean.substring(1);
+        const q2 = query(usersRef, where('phone', '>=', withoutZero), where('phone', '<=', withoutZero + '\uf8ff'), limit(15));
+        const snap2 = await getDocs(q2);
+        snap2.forEach(docSnap => {
+          const u = docSnap.data() as UserProfile;
+          if (u.uid !== auth.currentUser?.uid && !results.some(r => r.uid === u.uid)) {
+            results.push(u);
+          }
+        });
+      }
+
+      // If clean starts with "92" (Pakistan country code) and database has "03..."
+      if (clean.startsWith('92') && results.length === 0) {
+        const withZero = '0' + clean.substring(2);
+        const q3 = query(usersRef, where('phone', '>=', withZero), where('phone', '<=', withZero + '\uf8ff'), limit(15));
+        const snap3 = await getDocs(q3);
+        snap3.forEach(docSnap => {
+          const u = docSnap.data() as UserProfile;
+          if (u.uid !== auth.currentUser?.uid && !results.some(r => r.uid === u.uid)) {
+            results.push(u);
+          }
+        });
+      }
+
+      // If clean doesn't start with 0 or 92 (e.g. "321..."), also check "0321..."
+      if (!clean.startsWith('0') && !clean.startsWith('92') && results.length === 0) {
+        const withZero = '0' + clean;
+        const q4 = query(usersRef, where('phone', '>=', withZero), where('phone', '<=', withZero + '\uf8ff'), limit(15));
+        const snap4 = await getDocs(q4);
+        snap4.forEach(docSnap => {
+          const u = docSnap.data() as UserProfile;
+          if (u.uid !== auth.currentUser?.uid && !results.some(r => r.uid === u.uid)) {
+            results.push(u);
+          }
+        });
+      }
+
+      return results;
+    } catch (e) {
+      console.warn("Search user by phone error:", e);
+      return [];
+    }
+  },
+
+  // --- Chat Rooms ---
+  getOrCreateChatRoom: async (otherUser: UserProfile, currentUserProfile?: { name: string; phone: string; photoURL?: string }): Promise<ChatRoom> => {
+    const currentUid = auth.currentUser?.uid;
+    if (!currentUid) throw new Error("Must be logged in to chat");
+
+    const p0 = currentUid.replace(/[^a-zA-Z0-9]/g, '_');
+    const p1 = otherUser.uid.replace(/[^a-zA-Z0-9]/g, '_');
+    const sortedParticipants = [currentUid, otherUser.uid].sort();
+    const sortedClean = [p0, p1].sort();
+    const roomId = `room_${sortedClean[0]}_${sortedClean[1]}`;
+    const roomRef = doc(db, 'chat_rooms', roomId);
+
+    const currentName = currentUserProfile?.name || auth.currentUser?.displayName || 'User';
+    const currentPhone = currentUserProfile?.phone || '';
+    const currentPhoto = currentUserProfile?.photoURL || auth.currentUser?.photoURL || '';
+
+    try {
+      const roomSnap = await getDoc(roomRef);
+      if (roomSnap.exists()) {
+        const existingData = roomSnap.data() as ChatRoom;
+        // Make sure participant details are up-to-date
+        return {
+          ...existingData,
+          participantDetails: {
+            ...existingData.participantDetails,
+            [currentUid]: {
+              name: currentName,
+              phone: currentPhone,
+              photoURL: currentPhoto
+            },
+            [otherUser.uid]: {
+              name: otherUser.name,
+              phone: otherUser.phone,
+              photoURL: otherUser.photoURL || ''
+            }
+          }
+        };
+      }
+    } catch (e) {
+      console.warn("Notice: room check, creating fresh room:", e);
+    }
+
+    const newRoom: ChatRoom = {
+      id: roomId,
+      participants: sortedParticipants,
+      participantDetails: {
+        [currentUid]: {
+          name: currentName,
+          phone: currentPhone,
+          photoURL: currentPhoto
+        },
+        [otherUser.uid]: {
+          name: otherUser.name,
+          phone: otherUser.phone,
+          photoURL: otherUser.photoURL || ''
+        }
+      },
+      lastMessageText: 'Chat started',
+      lastMessageType: 'text',
+      lastMessageSenderId: currentUid,
+      updatedAt: new Date().toISOString()
+    };
+
+    try {
+      await setDoc(roomRef, newRoom, { merge: true });
+      return newRoom;
+    } catch (e) {
+      console.warn("Could not setDoc on chat_rooms:", e);
+      return newRoom;
+    }
+  },
+
+  subscribeToChatRooms: (callback: (rooms: ChatRoom[]) => void) => {
+    const currentUid = auth.currentUser?.uid;
+    if (!currentUid) {
+      callback([]);
+      return () => {};
+    }
+
+    const q = query(
+      collection(db, 'chat_rooms'),
+      where('participants', 'array-contains', currentUid)
+    );
+
+    return onSnapshot(
+      q,
+      (snapshot) => {
+        const rooms = snapshot.docs.map(d => d.data() as ChatRoom);
+        rooms.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+        callback(rooms);
+      },
+      (e) => {
+        console.warn("Chat rooms subscription error:", e);
+      }
+    );
+  },
+
+  toggleArchiveChatRoom: async (roomId: string, currentArchived: boolean) => {
+    const currentUid = auth.currentUser?.uid;
+    if (!currentUid) return;
+    const roomRef = doc(db, 'chat_rooms', roomId);
+    try {
+      if (currentArchived) {
+        await updateDoc(roomRef, {
+          archivedBy: arrayRemove(currentUid),
+          updatedAt: new Date().toISOString()
+        });
+      } else {
+        await updateDoc(roomRef, {
+          archivedBy: arrayUnion(currentUid),
+          updatedAt: new Date().toISOString()
+        });
+      }
+    } catch (e) {
+      console.warn("Toggle archive failed:", e);
+    }
+  },
+
+  deleteChatRoomForUser: async (roomId: string) => {
+    const currentUid = auth.currentUser?.uid;
+    if (!currentUid) return;
+    const roomRef = doc(db, 'chat_rooms', roomId);
+    try {
+      await updateDoc(roomRef, {
+        deletedFor: arrayUnion(currentUid),
+        updatedAt: new Date().toISOString()
+      });
+    } catch (e) {
+      console.warn("Delete chat failed:", e);
+    }
+  },
+
+  // --- Messages ---
+  sendMessage: async (roomId: string, message: { text?: string; audioData?: string; audioDuration?: number; imageData?: string; type: 'text' | 'voice' | 'image' }) => {
+    const currentUid = auth.currentUser?.uid;
+    if (!currentUid) throw new Error("Must be logged in to send message");
+
+    const msgId = `msg_${generateId()}`;
+    const msgRef = doc(db, 'chat_rooms', roomId, 'messages', msgId);
+    const roomRef = doc(db, 'chat_rooms', roomId);
+
+    let lastPreview = message.text || '';
+    if (message.type === 'voice') lastPreview = '🎙️ Voice note';
+    if (message.type === 'image') lastPreview = '📷 Photo';
+
+    const chatMsg: ChatMessage = {
+      id: msgId,
+      roomId,
+      senderId: currentUid,
+      senderName: auth.currentUser?.displayName || 'User',
+      type: message.type,
+      text: message.text || '',
+      audioData: message.audioData || '',
+      audioDuration: message.audioDuration || 0,
+      imageData: message.imageData || '',
+      createdAt: new Date().toISOString()
+    };
+
+    try {
+      await setDoc(msgRef, chatMsg);
+      // Update room last message
+      await updateDoc(roomRef, {
+        lastMessageText: lastPreview,
+        lastMessageType: message.type,
+        lastMessageSenderId: currentUid,
+        updatedAt: new Date().toISOString()
+      }).catch(e => {
+        console.warn("Could not update room preview:", e);
+      });
+      return chatMsg;
+    } catch (e) {
+      handleFirestoreError(e, OperationType.CREATE, `chat_rooms/${roomId}/messages/${msgId}`);
+      throw e;
+    }
+  },
+
+  // Log Call Events (Missed Calls, Call Completed, Declined) directly in the Chat Room
+  sendCallLogMessage: async (
+    caller: { uid: string; name: string; phone?: string; photoURL?: string },
+    receiver: { uid: string; name: string; phone?: string; photoURL?: string },
+    status: 'missed' | 'completed' | 'rejected' | 'busy',
+    durationSeconds: number = 0,
+    callId?: string
+  ) => {
+    try {
+      const sortedParticipants = [caller.uid, receiver.uid].sort();
+      const roomId = sortedParticipants.join('_');
+      const roomRef = doc(db, 'chat_rooms', roomId);
+
+      // Ensure room exists
+      await setDoc(roomRef, {
+        id: roomId,
+        participants: sortedParticipants,
+        participantDetails: {
+          [caller.uid]: {
+            name: caller.name,
+            phone: caller.phone || '',
+            photoURL: caller.photoURL || ''
+          },
+          [receiver.uid]: {
+            name: receiver.name,
+            phone: receiver.phone || '',
+            photoURL: receiver.photoURL || ''
+          }
+        },
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+
+      const msgId = `call_${generateId()}`;
+      const msgRef = doc(db, 'chat_rooms', roomId, 'messages', msgId);
+
+      const mins = Math.floor(durationSeconds / 60);
+      const secs = durationSeconds % 60;
+      const formattedDuration = mins > 0 
+        ? `${mins}m ${secs}s`
+        : `${secs}s`;
+
+      let callText = 'Missed voice call';
+      let previewText = '📞 Missed voice call';
+
+      if (status === 'completed') {
+        callText = `Voice call (${formattedDuration})`;
+        previewText = `📞 Voice call (${formattedDuration})`;
+      } else if (status === 'rejected') {
+        callText = 'Call declined';
+        previewText = '📞 Call declined';
+      } else if (status === 'busy') {
+        callText = 'Line busy';
+        previewText = '📞 Line busy';
+      }
+
+      const chatMsg: ChatMessage = {
+        id: msgId,
+        roomId,
+        senderId: caller.uid,
+        senderName: caller.name,
+        type: 'call',
+        text: callText,
+        callInfo: {
+          callId: callId || msgId,
+          status,
+          duration: durationSeconds,
+          callerId: caller.uid,
+          receiverId: receiver.uid
+        },
+        createdAt: new Date().toISOString()
+      };
+
+      await setDoc(msgRef, chatMsg);
+
+      await updateDoc(roomRef, {
+        lastMessageText: previewText,
+        lastMessageType: 'call',
+        lastMessageSenderId: caller.uid,
+        lastMessageCallStatus: status,
+        updatedAt: new Date().toISOString()
+      }).catch(e => {
+        console.warn("Could not update chat room call preview:", e);
+      });
+
+      return chatMsg;
+    } catch (e) {
+      console.warn("Failed to record call log message:", e);
+      return null;
+    }
+  },
+
+  subscribeToMessages: (roomId: string, callback: (messages: ChatMessage[]) => void) => {
+    const q = query(
+      collection(db, 'chat_rooms', roomId, 'messages'),
+      orderBy('createdAt', 'asc')
+    );
+
+    return onSnapshot(
+      q,
+      (snapshot) => {
+        const msgs = snapshot.docs.map(d => d.data() as ChatMessage);
+        callback(msgs);
+      },
+      (e) => {
+        console.warn(`Messages subscription error for room ${roomId}:`, e);
       }
     );
   }

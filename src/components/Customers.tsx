@@ -22,7 +22,8 @@ import {
   Calendar,
   Image as ImageIcon,
   Upload,
-  Pencil
+  Pencil,
+  MessageSquare
 } from 'lucide-react';
 import { ConfirmModal } from './ConfirmModal';
 import { Customer, Transaction, ShopSettings } from '../types';
@@ -40,6 +41,7 @@ interface CustomersProps {
   settings: ShopSettings;
   setIsNavHidden: (hidden: boolean) => void;
   initialCustomerId?: string | null;
+  onOpenChat?: (customer: { id: string; name: string; phone: string }) => void;
 }
 
 import { Calculator } from './Calculator';
@@ -53,7 +55,8 @@ export function Customers({
   setTransactions, 
   settings, 
   setIsNavHidden,
-  initialCustomerId = null
+  initialCustomerId = null,
+  onOpenChat
 }: CustomersProps) {
   const [filterType, setFilterType] = useState<'all' | 'dene' | 'lene'>('all');
   const [showReportOptions, setShowReportOptions] = useState(false);
@@ -625,6 +628,21 @@ export function Customers({
             </div>
           </div>
           <div className="flex gap-2 relative">
+            {settings.chatEnabled !== false && onOpenChat && selectedCustomer.phone && (
+              <button 
+                onClick={() => onOpenChat({
+                  id: selectedCustomer.id,
+                  name: selectedCustomer.name,
+                  phone: selectedCustomer.phone
+                })}
+                className="p-2 bg-emerald-50 rounded-xl text-emerald-600 hover:bg-emerald-100 transition-colors flex items-center gap-1 font-bold text-xs"
+                title="Chat & Voice Note"
+              >
+                <MessageSquare size={18} />
+                <span className="hidden sm:inline">Chat</span>
+              </button>
+            )}
+
             <button 
               onClick={() => setShowReportOptions(!showReportOptions)}
               className="p-2 bg-slate-100 rounded-xl text-slate-600 hover:bg-slate-200 transition-colors"

@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import Papa from 'papaparse';
 import { ShopSettings } from '../types';
-import { Store, Phone, Languages, RefreshCcw, Lock, Shield, Moon, Sun, Image as ImageIcon, FileText, Cloud, LogIn, LogOut, Upload, Mail, ScanFace, Fingerprint } from 'lucide-react';
+import { Store, Phone, Languages, RefreshCcw, Lock, Shield, Moon, Sun, Image as ImageIcon, FileText, Cloud, LogIn, LogOut, Upload, Mail, ScanFace, Fingerprint, MessageSquare } from 'lucide-react';
 import { ConfirmModal } from './ConfirmModal';
 import { PINScreen } from './PINScreen';
 import { cn } from '../lib/utils';
@@ -460,6 +460,36 @@ export function Settings({ settings, setSettings }: SettingsProps) {
             <div className={cn(
               "absolute top-1 w-4 h-4 rounded-full bg-white transition-all",
               settings.theme === 'dark' ? 'right-1' : 'left-1'
+            )} />
+          </button>
+        </div>
+      </section>
+
+      {/* In-App Direct Chat & Voice Notes Feature Toggle (Undo / Kill Switch) */}
+      <section className="bg-white dark:bg-slate-800 rounded-3xl p-6 border border-slate-100 dark:border-slate-700 shadow-sm space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+             <div className="bg-emerald-600 text-white p-2 rounded-xl">
+               <MessageSquare size={20}/>
+             </div>
+             <div>
+               <h3 className="font-bold text-slate-900 dark:text-white">Dukaan Chat & Voice Notes</h3>
+               <p className="text-[10px] text-slate-400 font-medium">Phone number se direct baatcheet aur voice notes ka feature on ya off karein (Feature Switch / Undo)</p>
+             </div>
+          </div>
+          <button 
+            onClick={() => {
+              const currentStatus = settings.chatEnabled !== false; // defaults to true
+              setSettings({ ...settings, chatEnabled: !currentStatus });
+            }}
+            className={cn(
+              "w-12 h-6 rounded-full transition-all relative",
+              settings.chatEnabled !== false ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-600'
+            )}
+          >
+            <div className={cn(
+              "absolute top-1 w-4 h-4 rounded-full bg-white transition-all",
+              settings.chatEnabled !== false ? 'right-1' : 'left-1'
             )} />
           </button>
         </div>

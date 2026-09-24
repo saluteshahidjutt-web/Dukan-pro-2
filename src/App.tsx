@@ -13,6 +13,7 @@ import {
   X,
   LogOut,
   MessageCircle,
+  MessageSquare,
   Lock,
   Unlock,
   ChevronUp,
@@ -30,10 +31,13 @@ import { POS } from './components/POS';
 import { Reports } from './components/Reports';
 import { Expenses } from './components/Expenses';
 import { Settings } from './components/Settings';
+import { ChatHub } from './components/ChatHub';
 import { Login } from './components/Login';
 import { Onboarding } from './components/Onboarding';
 import { PINScreen } from './components/PINScreen';
 import { ConfirmModal } from './components/ConfirmModal';
+import { VoiceCallModal } from './components/VoiceCallModal';
+import { webrtcService } from './lib/webrtcService';
 import { 
   onAuthStateChanged, 
   signOut,
@@ -41,7 +45,7 @@ import {
 } from './lib/firebase';
 import { auth } from './lib/firebase';
 import { FirestoreService } from './lib/firestoreService';
-import { Product, Customer, Transaction, ShopSettings, Expense } from './types';
+import { Product, Customer, Transaction, ShopSettings, Expense, CallSession } from './types';
 import { cn } from './lib/utils';
 import { useNetworkStatus } from './lib/hooks';
 
@@ -166,9 +170,117 @@ function MainApp() {
     });
   }, []);
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'customers' | 'inventory' | 'pos' | 'reports' | 'expenses' | 'settings'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'customers' | 'inventory' | 'pos' | 'reports' | 'expenses' | 'settings' | 'chat'>('dashboard');
+  const [chatTargetUser, setChatTargetUser] = useState<{ id: string; name: string; phone: string } | null>(null);
   const [lastBackPress, setLastBackPress] = useState(0);
   const [showExitToast, setShowExitToast] = useState(false);
+
+  // Live Voice Calling (WebRTC) States
+  const [currentCall, setCurrentCall] = useState<CallSession | null>(null);
+  const [incomingCall, setIncomingCall] = useState<CallSession | null>(null);
+
+  // Global Incoming Call Listener across all screens
+  useEffect(() => {
+    if (!user) return;
+    const unsub = webrtcService.subscribeToIncomingCalls((call) => {
+      if (call) {
+        setIncomingCall(call);
+        webrtcService.playIncomingRingtone();
+      } else {
+        setIncomingCall(null);
+        webrtcService.stopRingtone();
+      }
+    });
+    return () => unsub();
+  }, [user]);
+
+  const handleStartVoiceCall = async (targetUser: { uid: string; name: string; phone: string; photoURL?: string }) => {
+    if (!user) return;
+    try {
+      const myPhoto = shopSettings.logoUrl || shopSettings.photoURL || user.photoURL || '';
+      const caller = {
+        uid: user.uid,
+        name: shopSettings.name || user.displayName || 'User',
+        phone: shopSettings.phone || '',
+        photoURL: myPhoto
+      };
+      const initialCall: CallSession = {
+        id: 'calling',
+        callerId: caller.uid,
+        callerName: caller.name,
+        callerPhone: caller.phone,
+        callerPhoto: caller.photoURL,
+        receiverId: targetUser.uid,
+        receiverName: targetUser.name,
+        receiverPhone: targetUser.phone,
+        receiverPhoto: targetUser.photoURL || '',
+        status: 'ringing',
+        createdAt: new Date().toISOString()
+      };
+      setCurrentCall(initialCall);
+
+      const callId = await webrtcService.startCall(targetUser, caller, (status) => {
+        if (status === 'ended' || status === 'rejected' || status === 'busy') {
+          setTimeout(() => setCurrentCall(null), 1000);
+        } else {
+          setCurrentCall(prev => prev ? { ...prev, status } : null);
+        }
+      });
+      setCurrentCall(prev => prev ? { ...prev, id: callId } : null);
+    } catch (e) {
+      console.error("Start call failed:", e);
+      alert("Call connect nahi ho saki. Browser mein Microphone permission allow karein.");
+      setCurrentCall(null);
+    }
+  };
+
+  const handleAcceptIncomingCall = async () => {
+    if (!incomingCall) return;
+    const callToAnswer = incomingCall;
+    setIncomingCall(null);
+    webrtcService.stopRingtone();
+    setCurrentCall({ ...callToAnswer, status: 'connected' });
+
+    try {
+      await webrtcService.answerCall(callToAnswer, (status) => {
+        if (status === 'ended' || status === 'rejected') {
+          setTimeout(() => setCurrentCall(null), 1000);
+        } else {
+          setCurrentCall(prev => prev ? { ...prev, status } : null);
+        }
+      });
+    } catch (e) {
+      console.error("Answer error:", e);
+      setCurrentCall(null);
+    }
+  };
+
+  const handleRejectIncomingCall = async () => {
+    if (!incomingCall) return;
+    const callToReject = incomingCall;
+    setIncomingCall(null);
+    webrtcService.stopRingtone();
+    const caller = {
+      uid: callToReject.callerId,
+      name: callToReject.callerName,
+      phone: callToReject.callerPhone,
+      photoURL: callToReject.callerPhoto
+    };
+    const receiver = {
+      uid: callToReject.receiverId,
+      name: callToReject.receiverName,
+      phone: callToReject.receiverPhone,
+      photoURL: callToReject.receiverPhoto
+    };
+    await webrtcService.rejectCall(callToReject.id, caller, receiver);
+  };
+
+  const handleEndActiveCall = async () => {
+    if (currentCall) {
+      await webrtcService.endCall(currentCall.id);
+      setCurrentCall(null);
+    }
+  };
 
   // Sync activeTab with Browser History for Mobile Back Button
   useEffect(() => {
@@ -262,6 +374,13 @@ function MainApp() {
       if (s) {
         setShopSettings(s);
         setNeedsOnboarding(false);
+        if (s.phone) {
+          FirestoreService.syncUserProfile({
+            name: s.name || user?.displayName || 'Dukaan User',
+            phone: s.phone,
+            photoURL: s.logoUrl || s.photoURL || user?.photoURL || ''
+          });
+        }
       } else {
         if (!isGuest) {
           setNeedsOnboarding(true);
@@ -272,7 +391,13 @@ function MainApp() {
       }
     });
 
+    // Safety fallback: ensure loading spinner never hangs indefinitely
+    const fallbackTimer = setTimeout(() => {
+      setSettingsLoading(false);
+    }, 3000);
+
     return () => {
+      clearTimeout(fallbackTimer);
       unsubProducts();
       unsubCustomers();
       unsubTransactions();
@@ -441,6 +566,12 @@ function MainApp() {
       labelUr: 'Reports', 
       icon: <BarChart3 size={20} /> 
     },
+    ...(shopSettings.chatEnabled !== false ? [{ 
+      id: 'chat', 
+      label: t.chat || 'Chat', 
+      labelUr: 'Chat', 
+      icon: <MessageSquare size={20} /> 
+    }] : []),
     { 
       id: 'settings', 
       label: t.settings_title, 
@@ -472,6 +603,22 @@ function MainApp() {
           settings={shopSettings}
           setIsNavHidden={setIsNavHidden}
           initialCustomerId={targetCustomerId}
+          onOpenChat={(cust) => {
+            setChatTargetUser(cust);
+            setActiveTab('chat');
+          }}
+        />;
+      case 'chat':
+        return <ChatHub 
+          settings={shopSettings}
+          onClose={() => {
+            setChatTargetUser(null);
+            setActiveTab('dashboard');
+          }}
+          initialChatUserId={chatTargetUser?.id}
+          initialChatUserName={chatTargetUser?.name}
+          initialChatUserPhone={chatTargetUser?.phone}
+          onStartVoiceCall={handleStartVoiceCall}
         />;
       case 'inventory':
         return <Inventory 
@@ -691,6 +838,26 @@ function MainApp() {
                 <span className="sm:hidden">Sale</span>
               </button>
             )}
+
+            {/* Chat Direct Quick Access Button (Can be toggled in Settings) */}
+            {shopSettings.chatEnabled !== false && (
+              <button 
+                onClick={() => {
+                  setChatTargetUser(null);
+                  setActiveTab(activeTab === 'chat' ? 'dashboard' : 'chat');
+                }}
+                className={cn(
+                  "p-2 md:px-3 md:py-2 rounded-xl transition-all font-bold text-xs flex items-center gap-1.5 active:scale-95",
+                  activeTab === 'chat' 
+                    ? "bg-emerald-600 text-white shadow-md shadow-emerald-200" 
+                    : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                )}
+                title="Chat & Voice Notes"
+              >
+                <MessageSquare size={18} />
+                <span className="hidden md:inline">Chat</span>
+              </button>
+            )}
             
             <div className="relative">
               <button 
@@ -797,7 +964,7 @@ function MainApp() {
         </header>
 
         {/* Scrollable Content Area */}
-        <main className="flex-1 overflow-y-auto p-4 md:p-8 pb-32">
+        <main className={cn("flex-1 overflow-y-auto", activeTab === 'chat' ? "p-2 md:p-6 pb-2" : "p-4 md:p-8 pb-32")}>
           <AnimatePresence mode="wait">
             <motion.div
               key={activeTab}
@@ -813,7 +980,7 @@ function MainApp() {
       </div>
 
       {/* Bottom Navigation */}
-      {!isNavHidden && !isSidebarOpen && activeTab !== 'settings' && activeTab !== 'expenses' && (
+      {!isNavHidden && !isSidebarOpen && activeTab !== 'settings' && activeTab !== 'expenses' && activeTab !== 'chat' && (
         <>
           {/* Desktop Hover Trigger Zone (Bottom 30px) */}
           {!isMobile && !isNavLocked && (
@@ -944,6 +1111,16 @@ function MainApp() {
           await handleSignOut();
         }}
         onCancel={() => setSignOutConfirm(false)}
+      />
+
+      {/* Real-time WebRTC Live Voice Calling Modal & Incoming Call Banner */}
+      <VoiceCallModal
+        currentCall={currentCall}
+        incomingCall={incomingCall}
+        currentUserId={user?.uid || ''}
+        onAcceptIncoming={handleAcceptIncomingCall}
+        onRejectIncoming={handleRejectIncomingCall}
+        onEndCall={handleEndActiveCall}
       />
 
       {/* Locked screen fully disabled for testing */}
