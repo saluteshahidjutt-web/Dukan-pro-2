@@ -13,7 +13,6 @@ import {
   X,
   LogOut,
   MessageCircle,
-  MessageSquare,
   Lock,
   Unlock,
   ChevronUp,
@@ -31,14 +30,10 @@ import { POS } from './components/POS';
 import { Reports } from './components/Reports';
 import { Expenses } from './components/Expenses';
 import { Settings } from './components/Settings';
-import { ChatHub } from './components/ChatHub';
 import { Login } from './components/Login';
 import { Onboarding } from './components/Onboarding';
 import { PINScreen } from './components/PINScreen';
 import { ConfirmModal } from './components/ConfirmModal';
-import { VoiceCallModal } from './components/VoiceCallModal';
-import { webrtcService } from './lib/webrtcService';
-import { notificationService } from './lib/notificationService';
 import { 
   onAuthStateChanged, 
   signOut,
@@ -46,7 +41,7 @@ import {
 } from './lib/firebase';
 import { auth } from './lib/firebase';
 import { FirestoreService } from './lib/firestoreService';
-import { Product, Customer, Transaction, ShopSettings, Expense, CallSession } from './types';
+import { Product, Customer, Transaction, ShopSettings, Expense } from './types';
 import { cn } from './lib/utils';
 import { useNetworkStatus } from './lib/hooks';
 
@@ -140,34 +135,6 @@ function MainApp() {
     };
   }, []);
 
-  // Visual Viewport tracking for mobile soft keyboards (eliminates gap above keyboard)
-  useEffect(() => {
-    const updateAppHeight = () => {
-      const vv = window.visualViewport;
-      const h = vv ? vv.height : window.innerHeight;
-      document.documentElement.style.setProperty('--app-height', `${h}px`);
-    };
-
-    if (typeof window !== 'undefined') {
-      window.addEventListener('resize', updateAppHeight);
-      if (window.visualViewport) {
-        window.visualViewport.addEventListener('resize', updateAppHeight);
-        window.visualViewport.addEventListener('scroll', updateAppHeight);
-      }
-      updateAppHeight();
-    }
-
-    return () => {
-      if (typeof window !== 'undefined') {
-        window.removeEventListener('resize', updateAppHeight);
-        if (window.visualViewport) {
-          window.visualViewport.removeEventListener('resize', updateAppHeight);
-          window.visualViewport.removeEventListener('scroll', updateAppHeight);
-        }
-      }
-    };
-  }, []);
-
   // Sync effect
   useEffect(() => {
     if (isOnline && user && !localStorage.getItem('dukan_has_migrated')) {
@@ -189,6 +156,7 @@ function MainApp() {
           console.error("Sync after redirect failed:", err);
         }).finally(() => {
           setIsSyncing(false);
+          alert("Dukaan Pro Cloud Sync Active! Ap ka data ab mehfooz hai.");
         });
       }
     }).catch((error) => {
@@ -198,147 +166,9 @@ function MainApp() {
     });
   }, []);
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'customers' | 'inventory' | 'pos' | 'reports' | 'expenses' | 'settings' | 'chat'>('dashboard');
-  const [chatTargetUser, setChatTargetUser] = useState<{ id: string; name: string; phone: string } | null>(null);
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'customers' | 'inventory' | 'pos' | 'reports' | 'expenses' | 'settings'>('dashboard');
   const [lastBackPress, setLastBackPress] = useState(0);
   const [showExitToast, setShowExitToast] = useState(false);
-
-  // Live Voice Calling (WebRTC) States
-  const [currentCall, setCurrentCall] = useState<CallSession | null>(null);
-  const [incomingCall, setIncomingCall] = useState<CallSession | null>(null);
-
-  // Global Incoming Call Listener across all screens
-  useEffect(() => {
-    if (!user) return;
-
-    // Proactively request notification permission on login if not yet decided
-    if (notificationService.isSupported() && Notification.permission === 'default') {
-      notificationService.requestPermission().catch(() => {});
-    }
-
-    const unsub = webrtcService.subscribeToIncomingCalls((call) => {
-      if (call) {
-        setIncomingCall(call);
-        webrtcService.playIncomingRingtone();
-        const callLabel = call.callType === 'video' ? 'Incoming Video Call 📹' : undefined;
-        notificationService.showIncomingCallNotification(
-          { name: call.callerName, phone: call.callerPhone },
-          call.id,
-          call.callType
-        );
-      } else {
-        setIncomingCall(null);
-        webrtcService.stopRingtone();
-        notificationService.dismissIncomingCallNotification();
-      }
-    });
-    return () => {
-      unsub();
-      notificationService.dismissIncomingCallNotification();
-    };
-  }, [user]);
-
-  const handleStartCall = async (
-    targetUser: { uid: string; name: string; phone: string; photoURL?: string },
-    callType: 'voice' | 'video' = 'voice'
-  ) => {
-    if (!user) return;
-    try {
-      const myPhoto = shopSettings.logoUrl || shopSettings.photoURL || user.photoURL || '';
-      const caller = {
-        uid: user.uid,
-        name: shopSettings.name || user.displayName || 'User',
-        phone: shopSettings.phone || '',
-        photoURL: myPhoto
-      };
-      const initialCall: CallSession = {
-        id: 'calling',
-        callerId: caller.uid,
-        callerName: caller.name,
-        callerPhone: caller.phone,
-        callerPhoto: caller.photoURL,
-        receiverId: targetUser.uid,
-        receiverName: targetUser.name,
-        receiverPhone: targetUser.phone,
-        receiverPhoto: targetUser.photoURL || '',
-        callType: callType,
-        status: 'ringing',
-        createdAt: new Date().toISOString()
-      };
-      setCurrentCall(initialCall);
-
-      const callId = await webrtcService.startCall(targetUser, caller, (status) => {
-        if (status === 'ended' || status === 'rejected' || status === 'busy') {
-          setTimeout(() => setCurrentCall(null), 1000);
-        } else {
-          setCurrentCall(prev => prev ? { ...prev, status } : null);
-        }
-      }, callType);
-      setCurrentCall(prev => prev ? { ...prev, id: callId } : null);
-    } catch (e) {
-      console.warn("Start call caught error:", e);
-      setCurrentCall(null);
-    }
-  };
-
-  const handleStartVoiceCall = (targetUser: { uid: string; name: string; phone: string; photoURL?: string }) => {
-    return handleStartCall(targetUser, 'voice');
-  };
-
-  const handleStartVideoCall = (targetUser: { uid: string; name: string; phone: string; photoURL?: string }) => {
-    return handleStartCall(targetUser, 'video');
-  };
-
-  const handleAcceptIncomingCall = async () => {
-    if (!incomingCall) return;
-    const callToAnswer = incomingCall;
-    setIncomingCall(null);
-    webrtcService.stopRingtone();
-    notificationService.dismissIncomingCallNotification(callToAnswer.id);
-    setCurrentCall({ ...callToAnswer, status: 'connected' });
-
-    try {
-      await webrtcService.answerCall(callToAnswer, (status) => {
-        if (status === 'ended' || status === 'rejected') {
-          setTimeout(() => setCurrentCall(null), 1000);
-        } else {
-          setCurrentCall(prev => prev ? { ...prev, status } : null);
-        }
-      });
-    } catch (e) {
-      console.error("Answer error:", e);
-      setCurrentCall(null);
-    }
-  };
-
-  const handleRejectIncomingCall = async () => {
-    if (!incomingCall) return;
-    const callToReject = incomingCall;
-    setIncomingCall(null);
-    webrtcService.stopRingtone();
-    notificationService.dismissIncomingCallNotification(callToReject.id);
-    const caller = {
-      uid: callToReject.callerId,
-      name: callToReject.callerName,
-      phone: callToReject.callerPhone,
-      photoURL: callToReject.callerPhoto
-    };
-    const receiver = {
-      uid: callToReject.receiverId,
-      name: callToReject.receiverName,
-      phone: callToReject.receiverPhone,
-      photoURL: callToReject.receiverPhoto
-    };
-    await webrtcService.rejectCall(callToReject.id, caller, receiver);
-  };
-
-  const handleEndActiveCall = async () => {
-    if (currentCall) {
-      notificationService.dismissIncomingCallNotification(currentCall.id);
-      await webrtcService.endCall(currentCall.id);
-      setCurrentCall(null);
-    }
-  };
 
   // Sync activeTab with Browser History for Mobile Back Button
   useEffect(() => {
@@ -432,14 +262,6 @@ function MainApp() {
       if (s) {
         setShopSettings(s);
         setNeedsOnboarding(false);
-        if (s.phone && s.phoneVerified) {
-          FirestoreService.syncUserProfile({
-            name: s.name || user?.displayName || 'Dukaan User',
-            phone: s.phone,
-            phoneVerified: true,
-            photoURL: s.logoUrl || s.photoURL || user?.photoURL || ''
-          });
-        }
       } else {
         if (!isGuest) {
           setNeedsOnboarding(true);
@@ -450,13 +272,7 @@ function MainApp() {
       }
     });
 
-    // Safety fallback: ensure loading spinner never hangs indefinitely
-    const fallbackTimer = setTimeout(() => {
-      setSettingsLoading(false);
-    }, 3000);
-
     return () => {
-      clearTimeout(fallbackTimer);
       unsubProducts();
       unsubCustomers();
       unsubTransactions();
@@ -625,12 +441,6 @@ function MainApp() {
       labelUr: 'Reports', 
       icon: <BarChart3 size={20} /> 
     },
-    ...(shopSettings.chatEnabled !== false ? [{ 
-      id: 'chat', 
-      label: t.chat || 'Chat', 
-      labelUr: 'Chat', 
-      icon: <MessageSquare size={20} /> 
-    }] : []),
     { 
       id: 'settings', 
       label: t.settings_title, 
@@ -662,23 +472,6 @@ function MainApp() {
           settings={shopSettings}
           setIsNavHidden={setIsNavHidden}
           initialCustomerId={targetCustomerId}
-          onOpenChat={(cust) => {
-            setChatTargetUser(cust);
-            setActiveTab('chat');
-          }}
-        />;
-      case 'chat':
-        return <ChatHub 
-          settings={shopSettings}
-          onClose={() => {
-            setChatTargetUser(null);
-            setActiveTab('dashboard');
-          }}
-          initialChatUserId={chatTargetUser?.id}
-          initialChatUserName={chatTargetUser?.name}
-          initialChatUserPhone={chatTargetUser?.phone}
-          onStartVoiceCall={handleStartVoiceCall}
-          onStartVideoCall={handleStartVideoCall}
         />;
       case 'inventory':
         return <Inventory 
@@ -821,7 +614,7 @@ function MainApp() {
 
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col w-full bg-slate-50 dark:bg-slate-900 relative min-h-screen md:min-h-0">
+      <div className="flex-1 flex flex-col h-screen w-full bg-slate-50 dark:bg-slate-900 relative overflow-hidden">
         {/* Top Header - Responsive */}
         <header className="h-16 md:h-20 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between px-4 md:px-8 shrink-0 z-20 sticky top-0 md:bg-white/80 dark:md:bg-slate-800/80 md:backdrop-blur-md">
           <div className="flex items-center gap-3">
@@ -1004,7 +797,7 @@ function MainApp() {
         </header>
 
         {/* Scrollable Content Area */}
-        <main className={cn("flex-1 min-h-0", activeTab === 'chat' ? "overflow-hidden p-0 md:p-3 flex flex-col" : "overflow-y-auto p-4 md:p-8 pb-32")}>
+        <main className="flex-1 overflow-y-auto p-4 md:p-8 pb-32">
           <AnimatePresence mode="wait">
             <motion.div
               key={activeTab}
@@ -1012,7 +805,6 @@ function MainApp() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -20 }}
               transition={{ duration: 0.2, ease: "easeOut" }}
-              className={cn(activeTab === 'chat' && "h-full")}
             >
               {renderContent()}
             </motion.div>
@@ -1021,7 +813,7 @@ function MainApp() {
       </div>
 
       {/* Bottom Navigation */}
-      {!isNavHidden && !isSidebarOpen && activeTab !== 'settings' && activeTab !== 'expenses' && activeTab !== 'chat' && (
+      {!isNavHidden && !isSidebarOpen && activeTab !== 'settings' && activeTab !== 'expenses' && (
         <>
           {/* Desktop Hover Trigger Zone (Bottom 30px) */}
           {!isMobile && !isNavLocked && (
@@ -1064,22 +856,20 @@ function MainApp() {
               onTouchStart={(e) => {
                 const rect = e.currentTarget.getBoundingClientRect();
                 const relativeX = e.touches[0].clientX - rect.left;
-                const tabs = ['dashboard', 'customers', 'pos', 'inventory', 'chat'];
+                const tabs = ['dashboard', 'customers', 'pos', 'inventory', 'reports'];
                 const idx = Math.max(0, Math.min(tabs.length - 1, Math.floor((relativeX / rect.width) * tabs.length)));
                 const targetTab = tabs[idx];
                 if (targetTab && targetTab !== activeTab) {
-                  if (targetTab === 'chat') setChatTargetUser(null);
                   setActiveTab(targetTab);
                 }
               }}
               onTouchMove={(e) => {
                 const rect = e.currentTarget.getBoundingClientRect();
                 const relativeX = e.touches[0].clientX - rect.left;
-                const tabs = ['dashboard', 'customers', 'pos', 'inventory', 'chat'];
+                const tabs = ['dashboard', 'customers', 'pos', 'inventory', 'reports'];
                 const idx = Math.max(0, Math.min(tabs.length - 1, Math.floor((relativeX / rect.width) * tabs.length)));
                 const targetTab = tabs[idx];
                 if (targetTab && targetTab !== activeTab) {
-                  if (targetTab === 'chat') setChatTargetUser(null);
                   setActiveTab(targetTab);
                   if (typeof window !== 'undefined' && 'vibrate' in navigator) {
                     try { navigator.vibrate(8); } catch (_) {}
@@ -1089,11 +879,10 @@ function MainApp() {
               onPointerDown={(e) => {
                 const rect = e.currentTarget.getBoundingClientRect();
                 const relativeX = e.clientX - rect.left;
-                const tabs = ['dashboard', 'customers', 'pos', 'inventory', 'chat'];
+                const tabs = ['dashboard', 'customers', 'pos', 'inventory', 'reports'];
                 const idx = Math.max(0, Math.min(tabs.length - 1, Math.floor((relativeX / rect.width) * tabs.length)));
                 const targetTab = tabs[idx];
                 if (targetTab && targetTab !== activeTab) {
-                  if (targetTab === 'chat') setChatTargetUser(null);
                   setActiveTab(targetTab);
                 }
               }}
@@ -1101,11 +890,10 @@ function MainApp() {
                 if (e.buttons !== 1) return;
                 const rect = e.currentTarget.getBoundingClientRect();
                 const relativeX = e.clientX - rect.left;
-                const tabs = ['dashboard', 'customers', 'pos', 'inventory', 'chat'];
+                const tabs = ['dashboard', 'customers', 'pos', 'inventory', 'reports'];
                 const idx = Math.max(0, Math.min(tabs.length - 1, Math.floor((relativeX / rect.width) * tabs.length)));
                 const targetTab = tabs[idx];
                 if (targetTab && targetTab !== activeTab) {
-                  if (targetTab === 'chat') setChatTargetUser(null);
                   setActiveTab(targetTab);
                   if (typeof window !== 'undefined' && 'vibrate' in navigator) {
                     try { navigator.vibrate(8); } catch (_) {}
@@ -1125,7 +913,7 @@ function MainApp() {
                 </div>
               } label={t.sale} isCenter />
               <NavItem id="inventory" active={activeTab === 'inventory'} onClick={() => setActiveTab('inventory')} icon={<Package size={20} />} label={t.stock} />
-              <NavItem id="chat" active={activeTab === 'chat'} onClick={() => { setChatTargetUser(null); setActiveTab('chat'); }} icon={<MessageSquare size={20} />} label={t.chat || 'Chat'} />
+              <NavItem id="reports" active={activeTab === 'reports'} onClick={() => setActiveTab('reports')} icon={<BarChart3 size={20} />} label={t.report} />
             </nav>
           </div>
         </>
@@ -1156,16 +944,6 @@ function MainApp() {
           await handleSignOut();
         }}
         onCancel={() => setSignOutConfirm(false)}
-      />
-
-      {/* Real-time WebRTC Live Voice Calling Modal & Incoming Call Banner */}
-      <VoiceCallModal
-        currentCall={currentCall}
-        incomingCall={incomingCall}
-        currentUserId={user?.uid || ''}
-        onAcceptIncoming={handleAcceptIncomingCall}
-        onRejectIncoming={handleRejectIncomingCall}
-        onEndCall={handleEndActiveCall}
       />
 
       {/* Locked screen fully disabled for testing */}

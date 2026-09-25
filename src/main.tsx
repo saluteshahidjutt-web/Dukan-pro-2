@@ -5,22 +5,8 @@ import App from './App.tsx';
 import './index.css';
 import { registerSW } from 'virtual:pwa-register';
 
-// Catch global unhandled promise rejections safely
-if (typeof window !== 'undefined') {
-  window.addEventListener('unhandledrejection', (event) => {
-    console.warn("Global async task warning handled:", event.reason);
-    event.preventDefault();
-  });
-}
-
-// Register service worker for PWA (skip in cross-origin iframes like AI Studio preview)
-try {
-  if (typeof window !== 'undefined' && 'serviceWorker' in navigator && window.self === window.top) {
-    registerSW({ immediate: true });
-  }
-} catch (e) {
-  console.warn("Service worker registration skipped:", e);
-}
+// Register service worker for PWA
+registerSW({ immediate: true });
 
 try {
   createRoot(document.getElementById('root')!).render(

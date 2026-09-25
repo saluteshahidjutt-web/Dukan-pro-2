@@ -5,11 +5,11 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Lock, Delete, ArrowLeft, ShieldCheck, HelpCircle, ScanFace, Fingerprint, CheckCircle2, AlertCircle, KeyRound, Sparkles } from 'lucide-react';
+import { Lock, Delete, ArrowLeft, ShieldCheck, HelpCircle, ScanFace, Fingerprint, CheckCircle2, AlertCircle } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { ShopSettings } from '../types';
 import { hashValue } from '../lib/security';
-import { authenticateBiometric, detectBiometricType } from '../lib/biometric';
+import { authenticateBiometric } from '../lib/biometric';
 import { translations, Language } from '../lib/translations';
 
 interface PINScreenProps {
@@ -21,17 +21,6 @@ interface PINScreenProps {
 }
 
 export function PINScreen({ settings, onSuccess, mode, onBack, onSetupComplete }: PINScreenProps) {
-  const biometricType = settings.biometricType || detectBiometricType();
-  const isApple = biometricType === 'face';
-
-  // Mode: biometric visual vs pin keypad
-  const [viewMode, setViewMode] = useState<'biometric' | 'pin'>(() => {
-    if (mode === 'unlock' && settings.biometricEnabled) {
-      return 'biometric';
-    }
-    return 'pin';
-  });
-
   const [pin, setPin] = useState('');
   const [error, setError] = useState(false);
   const [isForgotMode, setIsForgotMode] = useState(false);
@@ -41,74 +30,60 @@ export function PINScreen({ settings, onSuccess, mode, onBack, onSetupComplete }
   const [question, setQuestion] = useState('');
   const [answer, setAnswer] = useState('');
 
-  // Biometric status
-  const [biometricStatus, setBiometricStatus] = useState<'scanning' | 'success' | 'failed' | 'idle'>('idle');
-  const [biometricMessage, setBiometricMessage] = useState<string>('');
-  const hasAutoStartedRef = useRef(false);
+  // Biometric states
+  const [isScanningBiometric, setIsScanningBiometric] = useState<boolean>(false);
+  const [biometricStatus, setBiometricStatus] = useState<'idle' | 'scanning' | 'success' | 'failed'>('idle');
+  const [biometricError, setBiometricError] = useState<string>('');
+
+  const hasAutoScannedRef = useRef(false);
 
   const t = translations[settings.language as Language || 'en'];
 
-  // Apply biometric verification
-  const runBiometricAuth = useCallback(async (isManualTrigger = false) => {
+  const handleBiometricScan = useCallback(async () => {
+    setIsScanningBiometric(true);
     setBiometricStatus('scanning');
-    setBiometricMessage(isApple ? 'Scanning Face ID...' : 'Verifying Fingerprint...');
+    setBiometricError('');
 
     try {
-      // Simulate scan animation delay for authentic feel
-      const minDelayPromise = new Promise(resolve => setTimeout(resolve, 850));
-      const authPromise = authenticateBiometric(settings.biometricCredentialId);
-      const [res] = await Promise.all([authPromise, minDelayPromise]);
-
+      const res = await authenticateBiometric(settings.biometricCredentialId);
       if (res.success) {
         setBiometricStatus('success');
-        setBiometricMessage(isApple ? 'Face ID Verified!' : 'Fingerprint Verified!');
-        if ('vibrate' in navigator) navigator.vibrate([60, 40, 60]);
+        if ('vibrate' in navigator) navigator.vibrate([80, 40, 80]);
         setTimeout(() => {
+          setIsScanningBiometric(false);
           onSuccess();
-        }, 450);
+        }, 500);
       } else {
         setBiometricStatus('failed');
-        setBiometricMessage(res.error || (isApple ? 'Face ID not recognized' : 'Fingerprint did not match'));
-        if ('vibrate' in navigator) navigator.vibrate([150, 60, 150]);
-        // If automatic verification didn't match, transition to PIN code requested
+        setBiometricError(res.error || 'Face ID / Fingerprint did not match. Please enter PIN code.');
+        if ('vibrate' in navigator) navigator.vibrate([150, 80, 150]);
         setTimeout(() => {
-          setViewMode('pin');
-          setBiometricStatus('idle');
-        }, 1100);
+          setIsScanningBiometric(false);
+        }, 800);
       }
     } catch (err) {
-      console.warn("Biometric failed:", err);
+      console.error("Biometric scan error:", err);
       setBiometricStatus('failed');
-      setBiometricMessage('Authentication failed. Please enter PIN code.');
+      setBiometricError('Face ID / Fingerprint cancelled or failed. Please enter PIN code.');
       setTimeout(() => {
-        setViewMode('pin');
-        setBiometricStatus('idle');
-      }, 1000);
+        setIsScanningBiometric(false);
+      }, 800);
     }
-  }, [isApple, settings.biometricCredentialId, onSuccess]);
+  }, [settings.biometricCredentialId, onSuccess]);
 
-  // When opening web app, Face ID option appears first with animation then applied
+  // Auto trigger Face ID / Fingerprint ONCE when app opens if biometric is enabled
   useEffect(() => {
-    if (mode === 'unlock' && settings.biometricEnabled && viewMode === 'biometric' && !hasAutoStartedRef.current) {
-      hasAutoStartedRef.current = true;
-      if (isApple) {
-        // iOS Face ID auto-scan animation
-        const timer = setTimeout(() => {
-          runBiometricAuth(false);
-        }, 400);
-        return () => clearTimeout(timer);
-      } else {
-        // On Android: prompt the user to tap the fingerprint icon
-        setBiometricStatus('idle');
-        setBiometricMessage('Click the fingerprint icon to open Dukaan Pro');
-      }
+    if (mode === 'unlock' && settings.biometricEnabled && !hasAutoScannedRef.current) {
+      hasAutoScannedRef.current = true;
+      handleBiometricScan();
     }
-  }, [mode, settings.biometricEnabled, viewMode, isApple, runBiometricAuth]);
+  }, [mode, settings.biometricEnabled, handleBiometricScan]);
 
   const handleNumberClick = (num: string) => {
     if (pin.length < 4) {
       setPin(prev => prev + num);
       setError(false);
+      setBiometricError('');
     }
   };
 
@@ -122,9 +97,7 @@ export function PINScreen({ settings, onSuccess, mode, onBack, onSetupComplete }
         if (pin.length === 4) {
           if (mode === 'unlock' || mode === 'verify_old') {
             const inputHash = await hashValue(pin);
-            const expectedHash = settings.pinHash;
-            
-            if ((expectedHash && inputHash === expectedHash) || pin === '1234') {
+            if (inputHash === settings.pinHash) {
               onSuccess();
             } else {
               setError(true);
@@ -161,16 +134,13 @@ export function PINScreen({ settings, onSuccess, mode, onBack, onSetupComplete }
   const handleForgotSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const cleanAnswer = securityAnswer.toLowerCase().trim();
-      const answerHash = await hashValue(cleanAnswer);
-      const expectedAnswerHash = settings.securityAnswerHash || '9c2f49523b2d566bcea713fb00d0921f389bd6f9d86dcebe1cbf09e07b4c9ba4';
-      
-      if (answerHash === expectedAnswerHash || cleanAnswer === 'dukaan') {
-        alert('Security verified. App Unlocked. You can now update your PIN in settings.');
+      const answerHash = await hashValue(securityAnswer.toLowerCase().trim());
+      if (answerHash === settings.securityAnswerHash) {
+        alert('Security verified. App Unlocked. Please update your PIN in settings.');
         onSuccess();
       } else {
         setError(true);
-        alert('Incorrect answer. (Hint: default answer is "dukaan")');
+        alert('Incorrect answer.');
         setTimeout(() => setError(false), 500);
       }
     } catch (err) {
@@ -206,7 +176,7 @@ export function PINScreen({ settings, onSuccess, mode, onBack, onSetupComplete }
           <p className="text-slate-600 dark:text-slate-400 mb-6 font-medium">{t.reset_pin_desc}</p>
           <div className="bg-slate-50 dark:bg-slate-800 p-4 rounded-2xl mb-6 border border-slate-100 dark:border-slate-700">
             <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mb-1">{t.security_question}</p>
-            <p className="text-lg font-bold text-slate-900 dark:text-white">{settings.securityQuestion || 'Shop Name'}</p>
+            <p className="text-lg font-bold text-slate-900 dark:text-white">{settings.securityQuestion}</p>
           </div>
 
           <form onSubmit={handleForgotSubmit} className="space-y-4">
@@ -250,7 +220,7 @@ export function PINScreen({ settings, onSuccess, mode, onBack, onSetupComplete }
             <div>
               <label className="block text-xs font-bold text-slate-500 dark:text-slate-400 mb-1 uppercase tracking-wider">Example Questions</label>
               <div className="flex flex-wrap gap-2 mb-4">
-                {['Shop Name', 'Best Friend Name', 'Birth City', 'Mother Maiden Name'].map(q => (
+                {['Best Friend Name', 'Full Name', 'Birth City', 'Mother Maiden Name'].map(q => (
                   <button 
                     key={q} 
                     onClick={() => setQuestion(q)}
@@ -296,155 +266,81 @@ export function PINScreen({ settings, onSuccess, mode, onBack, onSetupComplete }
     );
   }
 
-  // --- VIEW 1: Dedicated Biometric Screen (Face ID / Fingerprint) ---
-  if (mode === 'unlock' && viewMode === 'biometric' && settings.biometricEnabled) {
-    return (
-      <div className="fixed inset-0 z-[1000] bg-slate-950 flex flex-col items-center justify-between p-8 select-none text-white overflow-hidden">
-        {/* Top Header */}
-        <div className="flex flex-col items-center gap-2 pt-6">
-          <div className="flex items-center gap-2 px-3 py-1 bg-white/10 rounded-full border border-white/10">
-            <ShieldCheck size={14} className="text-emerald-400" />
-            <span className="text-[11px] font-black uppercase tracking-wider text-slate-300">
-              {settings.name || 'Dukaan Pro'} &bull; Secure Lock
-            </span>
-          </div>
-        </div>
-
-        {/* Center Biometric Stage */}
-        <div className="flex-1 flex flex-col items-center justify-center w-full max-w-sm">
-          {isApple ? (
-            /* Apple Face ID Animation Interface */
-            <div className="flex flex-col items-center gap-6">
-              <motion.div 
-                initial={{ scale: 0.9, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                className="relative w-44 h-44 rounded-3xl border-2 border-emerald-500/30 flex items-center justify-center bg-slate-900/60 backdrop-blur-2xl shadow-2xl shadow-emerald-950/40 overflow-hidden cursor-pointer active:scale-95 transition-transform"
-                onClick={() => runBiometricAuth(true)}
-                title="Tap to scan Face ID"
-              >
-                {/* 4 iOS-style Corner Brackets */}
-                <div className="absolute top-2.5 left-2.5 w-6 h-6 border-t-2 border-l-2 border-emerald-400 rounded-tl-xl" />
-                <div className="absolute top-2.5 right-2.5 w-6 h-6 border-t-2 border-r-2 border-emerald-400 rounded-tr-xl" />
-                <div className="absolute bottom-2.5 left-2.5 w-6 h-6 border-b-2 border-l-2 border-emerald-400 rounded-bl-xl" />
-                <div className="absolute bottom-2.5 right-2.5 w-6 h-6 border-b-2 border-r-2 border-emerald-400 rounded-br-xl" />
-
-                {/* Animated Horizontal Laser Scan Line */}
-                {biometricStatus === 'scanning' && (
-                  <motion.div 
-                    animate={{ y: [-60, 60, -60] }}
-                    transition={{ repeat: Infinity, duration: 1.6, ease: "easeInOut" }}
-                    className="absolute left-4 right-4 h-0.5 bg-gradient-to-r from-transparent via-emerald-400 to-transparent shadow-[0_0_12px_#34d399]"
-                  />
-                )}
-
-                {/* Center Face ID Icon */}
-                <div className={cn(
-                  "transition-all duration-300 flex items-center justify-center",
-                  biometricStatus === 'success' && "text-emerald-400 scale-110",
-                  biometricStatus === 'failed' && "text-rose-400 shake",
-                  biometricStatus === 'scanning' && "text-emerald-300 animate-pulse",
-                  biometricStatus === 'idle' && "text-slate-300"
-                )}>
-                  {biometricStatus === 'success' ? (
-                    <CheckCircle2 size={80} className="animate-bounce" />
-                  ) : biometricStatus === 'failed' ? (
-                    <AlertCircle size={80} />
-                  ) : (
-                    <ScanFace size={80} strokeWidth={1.4} />
-                  )}
-                </div>
-              </motion.div>
-
-              <div className="text-center space-y-1.5">
-                <h3 className="text-2xl font-black tracking-tight text-white flex items-center justify-center gap-2">
-                  Face ID
-                  {biometricStatus === 'scanning' && (
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                  )}
-                </h3>
-                <p className="text-xs font-semibold text-slate-400">
-                  {biometricMessage || 'Authenticating with Face ID...'}
-                </p>
-              </div>
-            </div>
-          ) : (
-            /* Android Fingerprint Interface */
-            <div className="flex flex-col items-center gap-6">
-              <motion.button
-                type="button"
-                initial={{ scale: 0.9, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-                onClick={() => runBiometricAuth(true)}
-                className="relative w-44 h-44 rounded-full bg-emerald-500/10 border-2 border-emerald-400/40 flex items-center justify-center shadow-2xl shadow-emerald-950/50 group cursor-pointer"
-                title="Tap fingerprint to unlock"
-              >
-                {/* Expanding pulse ripple */}
-                <div className="absolute inset-0 rounded-full border border-emerald-400/30 animate-ping opacity-60" />
-                <div className="absolute inset-4 rounded-full border border-emerald-400/20" />
-
-                <div className={cn(
-                  "transition-all duration-300",
-                  biometricStatus === 'success' && "text-emerald-400 scale-110",
-                  biometricStatus === 'failed' && "text-rose-400",
-                  biometricStatus === 'scanning' && "text-emerald-300 animate-pulse",
-                  biometricStatus === 'idle' && "text-emerald-400 group-hover:text-emerald-300"
-                )}>
-                  {biometricStatus === 'success' ? (
-                    <CheckCircle2 size={80} className="animate-bounce" />
-                  ) : biometricStatus === 'failed' ? (
-                    <AlertCircle size={80} />
-                  ) : (
-                    <Fingerprint size={84} strokeWidth={1.5} />
-                  )}
-                </div>
-              </motion.button>
-
-              <div className="text-center space-y-1.5">
-                <h3 className="text-2xl font-black tracking-tight text-white">
-                  Fingerprint Unlock
-                </h3>
-                <p className="text-xs font-semibold text-slate-400">
-                  {biometricMessage || 'Click on the fingerprint icon to open Dukaan Pro'}
-                </p>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Bottom Options: Fallback to PIN */}
-        <div className="w-full max-w-sm flex flex-col items-center gap-3 pb-4">
-          <button
-            type="button"
-            onClick={() => {
-              setViewMode('pin');
-              setBiometricStatus('idle');
-            }}
-            className="w-full py-4 px-6 bg-white/10 hover:bg-white/15 active:scale-95 text-white font-black text-xs uppercase tracking-widest rounded-2xl border border-white/15 transition-all flex items-center justify-center gap-2 shadow-lg"
-          >
-            <KeyRound size={16} className="text-emerald-400" />
-            Enter 4-Digit PIN Instead
-          </button>
-          {onBack && (
-            <button
-              type="button"
-              onClick={onBack}
-              className="text-xs font-bold text-slate-400 hover:text-white uppercase tracking-wider py-2 transition-colors"
-            >
-              Cancel / Back to App
-            </button>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  // --- VIEW 2: 4-Digit PIN Keypad Screen ---
   return (
     <div className="fixed inset-0 z-[1000] bg-white dark:bg-slate-950 flex flex-col items-center justify-center p-8 select-none">
+      
+      {/* Biometric Scanning Overlay Modal */}
+      <AnimatePresence>
+        {isScanningBiometric && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[1100] bg-slate-950/80 backdrop-blur-2xl flex flex-col items-center justify-center p-6 text-white"
+          >
+            <motion.div 
+              initial={{ scale: 0.85, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.85, opacity: 0 }}
+              className="bg-slate-900/90 border border-white/10 rounded-3xl p-8 max-w-xs w-full flex flex-col items-center text-center shadow-2xl relative overflow-hidden"
+            >
+              {/* Scanning visual ring */}
+              <div className="relative w-28 h-28 flex items-center justify-center my-4">
+                <motion.div 
+                  animate={biometricStatus === 'scanning' ? { rotate: 360, scale: [1, 1.08, 1] } : { scale: 1 }}
+                  transition={{ repeat: biometricStatus === 'scanning' ? Infinity : 0, duration: 2, ease: "linear" }}
+                  className={cn(
+                    "absolute inset-0 rounded-full border-2 border-dashed transition-all duration-300",
+                    biometricStatus === 'scanning' && "border-emerald-400 border-t-transparent animate-spin",
+                    biometricStatus === 'success' && "border-emerald-500 bg-emerald-500/20",
+                    biometricStatus === 'failed' && "border-rose-500 bg-rose-500/20"
+                  )}
+                />
+                <div className={cn(
+                  "w-20 h-20 rounded-full flex items-center justify-center transition-all duration-300 relative z-10",
+                  biometricStatus === 'scanning' && "bg-emerald-500/20 text-emerald-400",
+                  biometricStatus === 'success' && "bg-emerald-500 text-white",
+                  biometricStatus === 'failed' && "bg-rose-500 text-white"
+                )}>
+                  {biometricStatus === 'success' ? (
+                    <CheckCircle2 size={44} className="animate-bounce" />
+                  ) : biometricStatus === 'failed' ? (
+                    <AlertCircle size={44} />
+                  ) : (
+                    <div className="flex items-center justify-center relative">
+                      <ScanFace size={40} className="animate-pulse" />
+                      <Fingerprint size={24} className="absolute opacity-80" />
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <h3 className="text-xl font-black text-white tracking-tight mt-2">
+                {biometricStatus === 'success' ? 'Face ID / Fingerprint Verified!' :
+                 biometricStatus === 'failed' ? 'Biometric Mismatch' :
+                 'Face ID / Fingerprint'}
+              </h3>
+
+              <p className="text-xs text-slate-300 font-medium mt-1.5 mb-6">
+                {biometricStatus === 'scanning' ? 'Verifying Face ID or Fingerprint...' :
+                 biometricStatus === 'success' ? 'Unlocking your Dukaan Pro...' :
+                 biometricError || 'Face ID did not match. Enter PIN code below.'}
+              </p>
+
+              <button
+                type="button"
+                onClick={() => setIsScanningBiometric(false)}
+                className="w-full py-3 bg-white/10 hover:bg-white/20 active:scale-95 text-white font-bold text-xs uppercase tracking-widest rounded-2xl border border-white/10 transition-all"
+              >
+                Use PIN Code
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <motion.div 
-        initial={{ scale: 0.95, opacity: 0 }}
+        initial={{ scale: 0.9, opacity: 0 }}
         animate={{ 
           scale: 1, 
           opacity: 1,
@@ -460,33 +356,48 @@ export function PINScreen({ settings, onSuccess, mode, onBack, onSetupComplete }
           type="button"
           onClick={() => {
             if (mode === 'unlock' && settings.biometricEnabled) {
-              setViewMode('biometric');
+              handleBiometricScan();
             }
           }}
-          className="w-24 h-24 bg-emerald-50 dark:bg-emerald-950/40 rounded-[32px] flex items-center justify-center text-emerald-600 dark:text-emerald-400 shadow-inner border-2 border-emerald-100 dark:border-emerald-900/40 overflow-hidden relative group active:scale-95 transition-transform cursor-pointer"
-          title="Switch to Face ID / Fingerprint"
+          className="w-32 h-32 bg-emerald-50 dark:bg-emerald-950/40 rounded-[36px] flex items-center justify-center text-emerald-600 dark:text-emerald-400 shadow-inner border-2 border-emerald-100 dark:border-emerald-900/40 overflow-hidden relative group active:scale-95 transition-transform cursor-pointer"
+          title="Tap to scan Face ID or Fingerprint"
         >
           {settings.logoUrl ? (
             <img src={settings.logoUrl} alt="Logo" className="w-full h-full object-cover" />
           ) : (
-            mode === 'setup' ? <ShieldCheck size={48} /> : (
+            mode === 'setup' ? <ShieldCheck size={64} /> : (
               settings.biometricEnabled ? (
-                isApple ? <ScanFace size={48} className="text-emerald-600 dark:text-emerald-400" /> : <Fingerprint size={48} className="text-emerald-600 dark:text-emerald-400" />
-              ) : <Lock size={48} />
+                <div className="relative flex items-center justify-center">
+                  <ScanFace size={60} className="text-emerald-600 dark:text-emerald-400 animate-pulse" />
+                  <Fingerprint size={28} className="absolute text-emerald-500 opacity-90" />
+                </div>
+              ) : <Lock size={64} />
             )
           )}
         </button>
 
         <div className="text-center">
           <h2 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-            {mode === 'unlock' ? 'Enter PIN Code' : mode === 'setup' ? (setupStep === 'pin' ? 'Create PIN' : 'Confirm PIN') : 'Verify Old PIN'}
+            {mode === 'unlock' ? 'Welcome Back' : mode === 'setup' ? (setupStep === 'pin' ? 'Create PIN' : 'Confirm PIN') : 'Verify Old PIN'}
           </h2>
-          <p className="text-slate-500 dark:text-slate-400 font-medium text-xs mt-1">
-            {mode === 'unlock' ? 'Enter your 4-digit code to unlock' : 
+          <p className="text-slate-500 dark:text-slate-400 font-medium text-sm mt-1">
+            {mode === 'unlock' ? 'Enter PIN or tap icon for Face ID / Fingerprint' : 
              mode === 'setup' ? (setupStep === 'pin' ? 'Choose a 4-digit secure code' : 'Repeat the code to confirm') : 
              'Please enter your current PIN to continue'}
           </p>
         </div>
+
+        {/* Error notification banner if Face ID did not match */}
+        {biometricError && mode === 'unlock' && (
+          <motion.div 
+            initial={{ opacity: 0, y: -5 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="w-full bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/50 rounded-2xl p-3 flex items-center gap-2.5 text-rose-700 dark:text-rose-300 text-xs font-bold"
+          >
+            <AlertCircle size={18} className="shrink-0 text-rose-600 dark:text-rose-400" />
+            <span>{biometricError}</span>
+          </motion.div>
+        )}
 
         {/* PIN Indicators */}
         <div className="flex gap-4">
@@ -514,18 +425,19 @@ export function PINScreen({ settings, onSuccess, mode, onBack, onSetupComplete }
             </button>
           ))}
 
-          {/* Biometric Switch Button on bottom left of numpad */}
+          {/* Quick Face ID / Fingerprint button on Numpad */}
           {mode === 'unlock' && settings.biometricEnabled ? (
             <button
               type="button"
-              onClick={() => setViewMode('biometric')}
+              onClick={handleBiometricScan}
               className="w-16 h-16 rounded-2xl text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30 hover:bg-emerald-100 active:scale-95 transition-all flex flex-col items-center justify-center gap-0.5 border border-emerald-200 dark:border-emerald-800/60 shadow-sm"
-              title={isApple ? "Use Face ID" : "Use Fingerprint"}
+              title="Scan Face ID or Fingerprint"
             >
-              {isApple ? <ScanFace size={22} /> : <Fingerprint size={22} />}
-              <span className="text-[7.5px] font-black uppercase tracking-tighter">
-                {isApple ? 'Face ID' : 'Biometric'}
-              </span>
+              <div className="relative flex items-center justify-center">
+                <ScanFace size={22} />
+                <Fingerprint size={12} className="absolute opacity-80" />
+              </div>
+              <span className="text-[7.5px] font-black uppercase tracking-tighter">Biometric</span>
             </button>
           ) : (
             <div className="w-16 h-16" />

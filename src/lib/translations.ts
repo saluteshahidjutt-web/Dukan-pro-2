@@ -66,8 +66,6 @@ export const translations = {
     offline: 'Offline',
     online: 'Online',
     syncing: 'Syncing...',
-    chat: 'Chat',
-    chat_sub: 'Messages & Voice Notes',
   },
   roman: {
     dashboard: 'Ghar',
@@ -133,8 +131,6 @@ export const translations = {
     offline: 'Offline',
     online: 'Online',
     syncing: 'Sync Ho Raha Hai...',
-    chat: 'Baatcheet',
-    chat_sub: 'Messages aur Voice',
   },
   ur: {
     dashboard: 'گھر',
@@ -200,7 +196,5 @@ export const translations = {
     offline: 'آف لائن',
     online: 'آن لائن',
     syncing: 'سنک ہو رہا ہے...',
-    chat: 'چیٹ',
-    chat_sub: 'پیغامات اور آواز',
   }
 };

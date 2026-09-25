@@ -72,31 +72,6 @@ service cloud.firestore {
              data.createdAt is string;
     }
 
-    function isValidUserProfile(data) {
-      return data.keys().hasAll(['id', 'uid', 'name']) &&
-             data.keys().size() <= 15 &&
-             data.uid == request.auth.uid &&
-             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
-             (!('phone' in data) || (data.phone is string && data.phone.size() <= 30));
-    }
-
-    function isValidChatRoom(data) {
-      return data.keys().hasAll(['id', 'participants', 'updatedAt']) &&
-             data.keys().size() <= 15 &&
-             data.participants is list && data.participants.size() >= 2 && data.participants.size() <= 10 &&
-             request.auth.uid in data.participants;
-    }
-
-    function isValidChatMessage(data) {
-      return data.keys().hasAll(['id', 'roomId', 'senderId', 'type', 'createdAt']) &&
-             data.keys().size() <= 15 &&
-             data.senderId == request.auth.uid &&
-             data.type in ['text', 'voice', 'image', 'call'] &&
-             (!('text' in data) || (data.text is string && data.text.size() <= 2000)) &&
-             (!('audioData' in data) || (data.audioData is string && data.audioData.size() <= 800000)) &&
-             (!('imageData' in data) || (data.imageData is string && data.imageData.size() <= 800000));
-    }
-
     // --- Matches ---
 
     match /products/{productId} {
@@ -143,41 +118,6 @@ service cloud.firestore {
     match /settings/{userId} {
       allow get: if isSignedIn() && userId == request.auth.uid;
       allow write: if isSignedIn() && userId == request.auth.uid && isValidSettings(incoming());
-    }
-
-    // Public / Searchable Users for messaging by phone
-    match /users/{userId} {
-      allow get: if isSignedIn();
-      allow list: if isSignedIn();
-      allow create, update: if isSignedIn() && userId == request.auth.uid && isValidUserProfile(incoming());
-      allow delete: if isSignedIn() && userId == request.auth.uid;
-    }
-
-    // Chat Rooms between participants
-    match /chat_rooms/{roomId} {
-      allow get: if isSignedIn() && (resource == null || request.auth.uid in resource.data.participants);
-      allow list: if isSignedIn() && request.auth.uid in resource.data.participants;
-      allow create: if isSignedIn() && isValidChatRoom(incoming());
-      allow update: if isSignedIn() && request.auth.uid in existing().participants && isValidChatRoom(incoming());
-
-      // Messages in Chat Room
-      match /messages/{messageId} {
-        allow get: if isSignedIn();
-        allow list: if isSignedIn();
-        allow create: if isSignedIn() && isValidChatMessage(incoming());
-      }
-    }
-
-    // WebRTC Live Voice Calls
-    match /calls/{callId} {
-      allow get, list, create, update, delete: if isSignedIn();
-
-      match /callerCandidates/{candId} {
-        allow get, list, create, update, delete: if isSignedIn();
-      }
-      match /receiverCandidates/{candId} {
-        allow get, list, create, update, delete: if isSignedIn();
-      }
     }
 
     match /scanner_sessions/{shopId} {
