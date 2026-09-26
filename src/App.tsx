@@ -55,7 +55,25 @@ export default function App() {
 function MainApp() {
   const isOnline = useNetworkStatus();
   const [user, setUser] = useState<any>(null);
-  const [isGuest, setIsGuest] = useState(false);
+  const [isGuest, setIsGuest] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('dukan_is_guest') === 'true' ||
+             localStorage.getItem('dukan_guest_mode') === 'true' ||
+             Boolean(localStorage.getItem('dukan_settings')) ||
+             Boolean(localStorage.getItem('dukan_products'));
+    } catch {
+      return false;
+    }
+  });
+
+  const handleContinueAsGuest = () => {
+    try {
+      localStorage.setItem('dukan_is_guest', 'true');
+    } catch (e) {
+      console.error(e);
+    }
+    setIsGuest(true);
+  };
   const [isLocked, setIsLocked] = useState(true);
   const [authLoading, setAuthLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
@@ -330,7 +348,7 @@ function MainApp() {
         <Login />
         <div className="fixed bottom-10 left-0 right-0 flex justify-center z-50">
           <button 
-            onClick={() => setIsGuest(true)}
+            onClick={handleContinueAsGuest}
             className="text-emerald-400/60 font-bold text-xs underline underline-offset-4 hover:text-emerald-400 transition-colors"
           >
             CONTINUE WITHOUT LOGGING IN (OFFLINE ONLY)
@@ -398,12 +416,11 @@ function MainApp() {
 
   const handleSignOut = async () => {
     try {
+      localStorage.removeItem('dukan_is_guest');
       localStorage.removeItem('dukan_has_migrated');
-      localStorage.removeItem('dukan_products');
-      localStorage.removeItem('dukan_customers');
-      localStorage.removeItem('dukan_transactions');
-      localStorage.removeItem('dukan_settings');
       await signOut(auth);
+      setIsGuest(false);
+      setUser(null);
       window.location.reload();
     } catch (error) {
       console.error("Sign out error:", error);

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ShoppingCart, LogIn } from 'lucide-react';
-import { signInWithPopup, getGoogleProvider, auth } from '../lib/firebase';
+import { signInWithPopup, signInWithRedirect, getGoogleProvider, auth } from '../lib/firebase';
 import { motion } from 'motion/react';
 import { LegalModal } from './LegalModal';
 import { AboutContent, PrivacyContent, TermsContent } from './legalPages';
@@ -37,10 +37,22 @@ export function Login() {
     setIsLoading(true);
     try {
       const provider = new getGoogleProvider();
+      provider.setCustomParameters({
+        prompt: 'select_account'
+      });
       await signInWithPopup(auth, provider);
     } catch (error: any) {
-      if (error.code === 'auth/cancelled-popup-request') {
-        console.log('Popup request was already pending or cancelled by a new request.');
+      if (error.code === 'auth/cancelled-popup-request' || error.code === 'auth/popup-closed-by-user') {
+        console.log('Popup request was closed by user.');
+      } else if (error.code === 'auth/popup-blocked') {
+        try {
+          const provider = new getGoogleProvider();
+          provider.setCustomParameters({ prompt: 'select_account' });
+          await signInWithRedirect(auth, provider);
+          return;
+        } catch (redirectErr) {
+          console.error('Redirect login error:', redirectErr);
+        }
       } else {
         console.error('Login error:', error);
       }
@@ -74,7 +86,7 @@ export function Login() {
             <button
               onClick={handleLogin}
               disabled={isLoading}
-              className="w-full bg-white text-emerald-900 py-4 rounded-2xl font-black flex items-center justify-center gap-3 active:scale-95 transition-all shadow-xl shadow-black/20 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full bg-white text-emerald-900 py-4 rounded-2xl font-black flex items-center justify-center gap-3 active:scale-95 transition-all shadow-xl shadow-black/20 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-100"
             >
               {isLoading ? (
                 <div className="w-6 h-6 border-2 border-emerald-900/30 border-t-emerald-900 rounded-full animate-spin" />
