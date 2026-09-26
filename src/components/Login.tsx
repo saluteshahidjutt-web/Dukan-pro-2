@@ -4,10 +4,15 @@ import { signInWithPopup, getGoogleProvider, auth } from '../lib/firebase';
 import { motion } from 'motion/react';
 import { LegalModal } from './LegalModal';
 import { AboutContent, PrivacyContent, TermsContent } from './legalPages';
+import { RobotLoader } from './RobotLoader';
 
 export function Login() {
   const [isLoading, setIsLoading] = React.useState(false);
   const [activeModal, setActiveModal] = useState<'about' | 'privacy' | 'terms' | null>(null);
+
+  if (isLoading) {
+    return <RobotLoader message="Google Sign In Ho Raha Hai..." subMessage="Aap ka Dukaan account sync ho raha hai" />;
+  }
 
   useEffect(() => {
     const handlePopState = () => {

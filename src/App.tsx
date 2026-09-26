@@ -34,6 +34,7 @@ import { Login } from './components/Login';
 import { Onboarding } from './components/Onboarding';
 import { PINScreen } from './components/PINScreen';
 import { ConfirmModal } from './components/ConfirmModal';
+import { RobotLoader } from './components/RobotLoader';
 import { 
   onAuthStateChanged, 
   signOut,
@@ -317,11 +318,7 @@ function MainApp() {
   }
 
   if (authLoading || (user && settingsLoading)) {
-    return (
-      <div className="min-h-screen bg-emerald-900 flex items-center justify-center">
-        <div className="w-12 h-12 border-4 border-emerald-400 border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
+    return <RobotLoader message="Dukaan Pro Load Ho Raha Hai..." subMessage="Database sync aur shop setup ho raha hai" />;
   }
 
   if (!user && !isGuest) {

@@ -94,6 +94,75 @@
         "evidenceUrl": { "type": "string" }
       },
       "required": ["id", "ownerId", "amount", "description", "createdAt"]
+    },
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "Public searchable user profile by phone number",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "phoneVerified": { "type": "boolean" },
+        "email": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "status": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "uid", "name"]
+    },
+    "ChatRoom": {
+      "title": "Chat Room",
+      "description": "Chat conversations between users",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "participants": { "type": "array" },
+        "participantDetails": { "type": "object" },
+        "lastMessageText": { "type": "string" },
+        "lastMessageType": { "type": "string" },
+        "lastMessageSenderId": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "participants", "updatedAt"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "Messages inside a chat room",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "roomId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "type": { "type": "string" },
+        "text": { "type": "string" },
+        "audioData": { "type": "string" },
+        "audioDuration": { "type": "number" },
+        "imageData": { "type": "string" },
+        "callInfo": { "type": "object" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "roomId", "senderId", "type", "createdAt"]
+    },
+    "CallSession": {
+      "title": "CallSession",
+      "description": "WebRTC voice and video call signaling session",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "callerId": { "type": "string" },
+        "callerName": { "type": "string" },
+        "callerPhone": { "type": "string" },
+        "receiverId": { "type": "string" },
+        "receiverName": { "type": "string" },
+        "receiverPhone": { "type": "string" },
+        "callType": { "type": "string", "enum": ["voice", "video"] },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "callerId", "receiverId", "status", "createdAt"]
     }
   },
   "firestore": {
@@ -116,6 +185,22 @@
     "/settings/{userId}": {
       "schema": "Settings",
       "description": "Shop settings per user"
+    },
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Searchable user identity"
+    },
+    "/chat_rooms/{roomId}": {
+      "schema": "ChatRoom",
+      "description": "Chat room conversations"
+    },
+    "/chat_rooms/{roomId}/messages/{messageId}": {
+      "schema": "ChatMessage",
+      "description": "Messages in chat"
+    },
+    "/calls/{callId}": {
+      "schema": "CallSession",
+      "description": "WebRTC live voice call signaling documents"
     }
   }
 }

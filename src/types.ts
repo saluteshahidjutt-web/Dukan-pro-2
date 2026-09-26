@@ -72,8 +72,82 @@ export interface ShopSettings {
   securityQuestion?: string;
   securityAnswerHash?: string;
   logoUrl?: string;
+  photoURL?: string;
   receiptFooter?: string;
   address?: string;
   theme?: 'light' | 'dark';
   ownerEmail?: string;
+  chatEnabled?: boolean;
+  phoneVerified?: boolean;
+}
+
+export interface UserProfile {
+  id: string;
+  uid: string;
+  name: string;
+  phone: string;
+  phoneVerified?: boolean;
+  email?: string;
+  photoURL?: string;
+  status?: string;
+  updatedAt: string;
+}
+
+export interface ChatRoom {
+  id: string;
+  participants: string[]; // [uid1, uid2]
+  participantDetails: {
+    [uid: string]: {
+      name: string;
+      phone: string;
+      photoURL?: string;
+    };
+  };
+  archivedBy?: string[]; // list of uids who archived this chat
+  deletedFor?: string[]; // list of uids who deleted this chat
+  lastMessageText?: string;
+  lastMessageType?: 'text' | 'voice' | 'image' | 'call';
+  lastMessageSenderId?: string;
+  lastMessageCallStatus?: 'missed' | 'completed' | 'rejected' | 'busy';
+  lastMessageCallType?: 'voice' | 'video';
+  updatedAt: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  roomId: string;
+  senderId: string;
+  senderName: string;
+  type: 'text' | 'voice' | 'image' | 'call';
+  text?: string;
+  audioData?: string; // compressed base64 audio
+  audioDuration?: number; // seconds
+  imageData?: string; // compressed base64 image
+  callInfo?: {
+    callId?: string;
+    callType?: 'voice' | 'video';
+    status: 'missed' | 'completed' | 'rejected' | 'busy';
+    duration?: number; // duration in seconds if connected
+    callerId: string;
+    receiverId: string;
+  };
+  createdAt: string;
+}
+
+export interface CallSession {
+  id: string;
+  callerId: string;
+  callerName: string;
+  callerPhone: string;
+  callerPhoto?: string;
+  receiverId: string;
+  receiverName: string;
+  receiverPhone: string;
+  receiverPhoto?: string;
+  callType?: 'voice' | 'video';
+  status: 'ringing' | 'connected' | 'ended' | 'rejected' | 'busy';
+  offer?: any;
+  answer?: any;
+  createdAt: string;
+  endedAt?: string;
 }
