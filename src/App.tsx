@@ -34,7 +34,6 @@ import { Login } from './components/Login';
 import { Onboarding } from './components/Onboarding';
 import { PINScreen } from './components/PINScreen';
 import { ConfirmModal } from './components/ConfirmModal';
-import { RobotLoader } from './components/RobotLoader';
 import { 
   onAuthStateChanged, 
   signOut,
@@ -82,12 +81,22 @@ function MainApp() {
     return <PhoneScannerTerminal shopId={phoneScannerShopId} />;
   }
 
-  // Auth Listener
+  // Auth Listener with Instant 300ms Max Fallback
   useEffect(() => {
-    return onAuthStateChanged(auth, (u: any) => {
+    const timer = setTimeout(() => {
+      setAuthLoading(false);
+    }, 300);
+
+    const unsub = onAuthStateChanged(auth, (u: any) => {
       setUser(u);
       setAuthLoading(false);
+      clearTimeout(timer);
     });
+
+    return () => {
+      clearTimeout(timer);
+      unsub();
+    };
   }, []);
 
   // Global Error Handler for Async Errors and Rejections
@@ -258,7 +267,12 @@ function MainApp() {
     const unsubCustomers = FirestoreService.subscribeToCustomers(setCustomers);
     const unsubTransactions = FirestoreService.subscribeToTransactions(setTransactions);
     const unsubExpenses = FirestoreService.subscribeToExpenses(setExpenses);
+    const settingsTimer = setTimeout(() => {
+      setSettingsLoading(false);
+    }, 200);
+
     const unsubSettings = FirestoreService.subscribeToSettings((s) => {
+      clearTimeout(settingsTimer);
       setSettingsLoading(false);
       if (s) {
         setShopSettings(s);
@@ -318,7 +332,16 @@ function MainApp() {
   }
 
   if (authLoading || (user && settingsLoading)) {
-    return <RobotLoader message="Dukaan Pro Load Ho Raha Hai..." subMessage="Database sync aur shop setup ho raha hai" />;
+    return (
+      <div className="min-h-screen bg-emerald-950 flex flex-col items-center justify-center p-4">
+        <div className="w-16 h-16 bg-emerald-800/80 rounded-2xl flex items-center justify-center text-emerald-300 shadow-xl border border-emerald-700/50 mb-3 animate-pulse">
+          <ShoppingCart size={32} />
+        </div>
+        <div className="h-1 w-24 bg-emerald-900 rounded-full overflow-hidden">
+          <div className="h-full bg-emerald-400 w-1/2 animate-[ping_1s_infinite]" />
+        </div>
+      </div>
+    );
   }
 
   if (!user && !isGuest) {
