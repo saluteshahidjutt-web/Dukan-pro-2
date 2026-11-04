@@ -184,7 +184,7 @@ function MainApp() {
     });
   }, []);
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'customers' | 'inventory' | 'pos' | 'reports' | 'expenses' | 'settings'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'customers' | 'inventory' | 'pos' | 'reports' | 'expenses' | 'settings'>('customers');
   const [lastBackPress, setLastBackPress] = useState(0);
   const [showExitToast, setShowExitToast] = useState(false);
 
@@ -204,12 +204,12 @@ function MainApp() {
         return;
       }
 
-      // Fallback: If no state or sub-view handled it, default to dashboard
-      if (activeTab !== 'dashboard') {
-        setActiveTab('dashboard');
-        window.history.pushState({ tab: 'dashboard' }, '');
+      // Fallback: If no state or sub-view handled it, default to customers
+      if (activeTab !== 'customers') {
+        setActiveTab('customers');
+        window.history.pushState({ tab: 'customers' }, '');
       } else {
-        // We are on dashboard
+        // We are on customers
         const now = Date.now();
         if (now - lastBackPress < 2000) {
           setShowExitToast(false);
@@ -217,14 +217,14 @@ function MainApp() {
           setLastBackPress(now);
           setShowExitToast(true);
           setTimeout(() => setShowExitToast(false), 2000);
-          window.history.pushState({ tab: 'dashboard' }, '');
+          window.history.pushState({ tab: 'customers' }, '');
         }
       }
     };
 
     // Push initial state
-    if (window.history.state?.tab !== 'dashboard') {
-      window.history.replaceState({ tab: 'dashboard' }, '');
+    if (window.history.state?.tab !== 'customers') {
+      window.history.replaceState({ tab: 'customers' }, '');
     }
 
     window.addEventListener('popstate', handlePopState);
