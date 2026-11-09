@@ -83,6 +83,7 @@ function MainApp() {
   const [renderError, setRenderError] = useState<string | null>(null);
   const [targetCustomerId, setTargetCustomerId] = useState<string | null>(null);
   const [phoneScannerShopId, setPhoneScannerShopId] = useState<string | null>(null);
+  const [touchedTab, setTouchedTab] = useState<string | null>(null);
 
   // Parse phone scanner mode parameters
   useEffect(() => {
@@ -872,65 +873,90 @@ function MainApp() {
             <nav 
               onTouchStart={(e) => {
                 const rect = e.currentTarget.getBoundingClientRect();
-                const relativeX = e.touches[0].clientX - rect.left;
-                const tabs = ['dashboard', 'customers', 'pos', 'inventory', 'reports'];
+                const clientX = e.touches[0].clientX;
+                const relativeX = clientX - rect.left;
+                const tabs = ['dashboard', 'pos', 'customers', 'inventory', 'reports'];
                 const idx = Math.max(0, Math.min(tabs.length - 1, Math.floor((relativeX / rect.width) * tabs.length)));
                 const targetTab = tabs[idx];
-                if (targetTab && targetTab !== activeTab) {
-                  setActiveTab(targetTab);
-                }
-              }}
-              onTouchMove={(e) => {
-                const rect = e.currentTarget.getBoundingClientRect();
-                const relativeX = e.touches[0].clientX - rect.left;
-                const tabs = ['dashboard', 'customers', 'pos', 'inventory', 'reports'];
-                const idx = Math.max(0, Math.min(tabs.length - 1, Math.floor((relativeX / rect.width) * tabs.length)));
-                const targetTab = tabs[idx];
-                if (targetTab && targetTab !== activeTab) {
-                  setActiveTab(targetTab);
-                  if (typeof window !== 'undefined' && 'vibrate' in navigator) {
-                    try { navigator.vibrate(8); } catch (_) {}
+                if (targetTab) {
+                  setTouchedTab(targetTab);
+                  if (targetTab !== activeTab) {
+                    setActiveTab(targetTab);
                   }
                 }
               }}
+              onTouchMove={(e) => {
+                const target = e.currentTarget;
+                const clientX = e.touches[0].clientX;
+                requestAnimationFrame(() => {
+                  const rect = target.getBoundingClientRect();
+                  const relativeX = clientX - rect.left;
+                  const tabs = ['dashboard', 'pos', 'customers', 'inventory', 'reports'];
+                  const idx = Math.max(0, Math.min(tabs.length - 1, Math.floor((relativeX / rect.width) * tabs.length)));
+                  const targetTab = tabs[idx];
+                  if (targetTab) {
+                    setTouchedTab(targetTab);
+                    if (targetTab !== activeTab) {
+                      setActiveTab(targetTab);
+                      if (typeof window !== 'undefined' && 'vibrate' in navigator) {
+                        try { navigator.vibrate(5); } catch (_) {}
+                      }
+                    }
+                  }
+                });
+              }}
+              onTouchEnd={() => setTouchedTab(null)}
+              onTouchCancel={() => setTouchedTab(null)}
               onPointerDown={(e) => {
                 const rect = e.currentTarget.getBoundingClientRect();
                 const relativeX = e.clientX - rect.left;
-                const tabs = ['dashboard', 'customers', 'pos', 'inventory', 'reports'];
+                const tabs = ['dashboard', 'pos', 'customers', 'inventory', 'reports'];
                 const idx = Math.max(0, Math.min(tabs.length - 1, Math.floor((relativeX / rect.width) * tabs.length)));
                 const targetTab = tabs[idx];
-                if (targetTab && targetTab !== activeTab) {
-                  setActiveTab(targetTab);
+                if (targetTab) {
+                  setTouchedTab(targetTab);
+                  if (targetTab !== activeTab) {
+                    setActiveTab(targetTab);
+                  }
                 }
               }}
               onPointerMove={(e) => {
                 if (e.buttons !== 1) return;
-                const rect = e.currentTarget.getBoundingClientRect();
-                const relativeX = e.clientX - rect.left;
-                const tabs = ['dashboard', 'customers', 'pos', 'inventory', 'reports'];
-                const idx = Math.max(0, Math.min(tabs.length - 1, Math.floor((relativeX / rect.width) * tabs.length)));
-                const targetTab = tabs[idx];
-                if (targetTab && targetTab !== activeTab) {
-                  setActiveTab(targetTab);
-                  if (typeof window !== 'undefined' && 'vibrate' in navigator) {
-                    try { navigator.vibrate(8); } catch (_) {}
+                const target = e.currentTarget;
+                const clientX = e.clientX;
+                requestAnimationFrame(() => {
+                  const rect = target.getBoundingClientRect();
+                  const relativeX = clientX - rect.left;
+                  const tabs = ['dashboard', 'pos', 'customers', 'inventory', 'reports'];
+                  const idx = Math.max(0, Math.min(tabs.length - 1, Math.floor((relativeX / rect.width) * tabs.length)));
+                  const targetTab = tabs[idx];
+                  if (targetTab) {
+                    setTouchedTab(targetTab);
+                    if (targetTab !== activeTab) {
+                      setActiveTab(targetTab);
+                      if (typeof window !== 'undefined' && 'vibrate' in navigator) {
+                        try { navigator.vibrate(5); } catch (_) {}
+                      }
+                    }
                   }
-                }
+                });
               }}
+              onPointerUp={() => setTouchedTab(null)}
+              onMouseLeave={() => setTouchedTab(null)}
               className={cn(
-                "pointer-events-auto w-full max-w-lg mx-auto bg-white/70 dark:bg-slate-900/75 backdrop-blur-2xl border border-white/80 dark:border-white/20 shadow-[0_16px_40px_rgba(0,0,0,0.22),inset_0_1px_2px_rgba(255,255,255,0.85)] dark:shadow-[0_16px_40px_rgba(0,0,0,0.65),inset_0_1px_1.5px_rgba(255,255,255,0.25)] rounded-full px-2 py-1.5 flex justify-around items-center relative transition-all duration-300 ring-1 ring-black/5 dark:ring-white/10 before:absolute before:inset-x-6 before:top-0 before:h-[1px] before:bg-gradient-to-r before:from-transparent before:via-white/90 before:to-transparent before:z-20 overflow-hidden touch-none select-none will-change-transform transform-gpu",
+                "pointer-events-auto w-full max-w-lg mx-auto bg-white/75 dark:bg-slate-900/80 backdrop-blur-2xl border border-white/90 dark:border-white/20 shadow-[0_16px_40px_rgba(0,0,0,0.22),inset_0_1px_2px_rgba(255,255,255,0.85)] dark:shadow-[0_16px_40px_rgba(0,0,0,0.65),inset_0_1px_1.5px_rgba(255,255,255,0.25)] rounded-full px-2 py-1 flex justify-around items-center relative transition-all duration-300 ring-1 ring-black/5 dark:ring-white/10 before:absolute before:inset-x-6 before:top-0 before:h-[1px] before:bg-gradient-to-r before:from-transparent before:via-white/90 before:to-transparent before:z-20 overflow-hidden touch-none select-none will-change-transform transform-gpu",
                 isNavHidden && "opacity-0 pointer-events-none"
               )}
             >
-              <NavItem id="dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} icon={<LayoutDashboard size={20} />} label={t.home} />
-              <NavItem id="customers" active={activeTab === 'customers'} onClick={() => setActiveTab('customers')} icon={<Users size={20} />} label={t.customers} />
-              <NavItem id="pos" active={activeTab === 'pos'} onClick={() => setActiveTab('pos')} icon={
-                <div className="bg-gradient-to-tr from-emerald-600 to-emerald-400 text-white p-2.5 rounded-full shadow-lg shadow-emerald-500/40 ring-2 ring-white/80 dark:ring-slate-800/80 active:scale-90 transition-transform flex items-center justify-center">
-                  <ShoppingCart size={20} />
+              <NavItem id="dashboard" active={activeTab === 'dashboard'} touched={touchedTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} icon={<LayoutDashboard size={19} />} label={t.home} />
+              <NavItem id="pos" active={activeTab === 'pos'} touched={touchedTab === 'pos'} onClick={() => setActiveTab('pos')} icon={<ShoppingCart size={19} />} label={t.sale} />
+              <NavItem id="customers" active={activeTab === 'customers'} touched={touchedTab === 'customers'} onClick={() => setActiveTab('customers')} icon={
+                <div className="bg-gradient-to-tr from-emerald-600 to-emerald-400 text-white p-2 rounded-full shadow-lg shadow-emerald-500/40 ring-2 ring-white/80 dark:ring-slate-800/80 active:scale-90 transition-transform flex items-center justify-center">
+                  <Users size={19} />
                 </div>
-              } label={t.sale} isCenter />
-              <NavItem id="inventory" active={activeTab === 'inventory'} onClick={() => setActiveTab('inventory')} icon={<Package size={20} />} label={t.stock} />
-              <NavItem id="reports" active={activeTab === 'reports'} onClick={() => setActiveTab('reports')} icon={<BarChart3 size={20} />} label={t.report} />
+              } label={t.customers} isCenter />
+              <NavItem id="inventory" active={activeTab === 'inventory'} touched={touchedTab === 'inventory'} onClick={() => setActiveTab('inventory')} icon={<Package size={19} />} label={t.stock} />
+              <NavItem id="reports" active={activeTab === 'reports'} touched={touchedTab === 'reports'} onClick={() => setActiveTab('reports')} icon={<BarChart3 size={19} />} label={t.report} />
             </nav>
           </div>
         </>
@@ -968,34 +994,43 @@ function MainApp() {
   );
 }
 
-function NavItem({ id, active, onClick, icon, label, isCenter = false }: { id: string, active: boolean, onClick: () => void, icon: React.ReactNode, label: string, isCenter?: boolean }) {
+function NavItem({ id, active, touched, onClick, icon, label, isCenter = false }: { id: string, active: boolean, touched: boolean, onClick: () => void, icon: React.ReactNode, label: string, isCenter?: boolean }) {
+  const isHighlighted = active || touched;
   return (
     <button 
       data-nav-id={id}
       type="button"
       onClick={onClick}
       className={cn(
-        "flex flex-col items-center justify-center relative py-1.5 px-3 rounded-full transition-all duration-300 select-none touch-none",
-        isCenter ? "w-14" : "flex-1 min-w-[54px] max-w-[80px]",
-        active ? "text-emerald-600 dark:text-emerald-400 font-black" : "text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
+        "group flex flex-col items-center justify-center relative py-1 px-2 rounded-2xl transition-all duration-300 select-none touch-none active:scale-95",
+        isCenter ? "w-14" : "flex-1 min-w-[48px] max-w-[72px]",
+        isHighlighted ? "text-emerald-600 dark:text-emerald-400 font-black" : "text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
       )}
     >
-      {active && (
+      {isHighlighted && (
         <motion.div 
           layoutId="liquid-glass-active"
-          className="absolute inset-0 bg-emerald-500/20 dark:bg-emerald-400/25 rounded-full border border-emerald-500/40 dark:border-emerald-400/40 backdrop-blur-md shadow-[inset_0_1px_2px_rgba(255,255,255,0.7),0_4px_14px_rgba(16,185,129,0.3)] dark:shadow-[inset_0_1px_1px_rgba(255,255,255,0.3),0_4px_14px_rgba(16,185,129,0.4)] transform-gpu"
-          transition={{ type: "spring", stiffness: 500, damping: 34, mass: 0.6 }}
+          className="absolute inset-0.5 bg-gradient-to-b from-emerald-500/25 to-emerald-600/15 dark:from-emerald-400/30 dark:to-emerald-500/20 rounded-2xl border border-emerald-500/50 dark:border-emerald-400/50 backdrop-blur-xl shadow-[inset_0_1px_2px_rgba(255,255,255,0.9),0_6px_16px_rgba(16,185,129,0.35)] dark:shadow-[inset_0_1px_1px_rgba(255,255,255,0.4),0_6px_16px_rgba(16,185,129,0.45)] transform-gpu"
+          transition={{ type: "spring", stiffness: 500, damping: 28, mass: 0.4 }}
         />
       )}
-      <div className={cn("relative z-10 flex items-center justify-center transition-transform duration-200", active && "scale-110")}>
+      <motion.div 
+        animate={{ scale: isHighlighted ? 1.25 : 1, y: isHighlighted ? -3 : 0 }}
+        transition={{ type: "spring", stiffness: 500, damping: 24 }}
+        className="relative z-10 flex items-center justify-center text-emerald-600 dark:text-emerald-400"
+      >
         {icon}
-      </div>
-      <span className={cn(
-        "relative z-10 text-[9px] uppercase tracking-wider mt-0.5 transition-all duration-200", 
-        active ? "font-black tracking-widest text-emerald-600 dark:text-emerald-400" : "font-semibold opacity-75"
-      )}>
+      </motion.div>
+      <motion.span 
+        animate={{ scale: isHighlighted ? 1.12 : 1, opacity: isHighlighted ? 1 : 0.7 }}
+        transition={{ type: "spring", stiffness: 500, damping: 24 }}
+        className={cn(
+          "relative z-10 text-[9px] uppercase tracking-widest mt-0.5 font-extrabold whitespace-nowrap", 
+          isHighlighted ? "text-emerald-700 dark:text-emerald-300 font-black" : "opacity-75 group-hover:opacity-100"
+        )}
+      >
         {label}
-      </span>
+      </motion.span>
     </button>
   );
 }
