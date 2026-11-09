@@ -238,6 +238,18 @@ function MainApp() {
       window.history.pushState({ tab: activeTab }, '');
     }
   }, [activeTab]);
+
+  // Force reset to 'customers' whenever webapp comes back from background or is reopened
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        setActiveTab('customers');
+        window.history.replaceState({ tab: 'customers' }, '');
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, []);
   const [products, setProducts] = useState<Product[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -505,7 +517,7 @@ function MainApp() {
           setCustomers={() => {}}
           setTransactions={() => {}} 
           settings={shopSettings}
-          onComplete={() => setActiveTab('dashboard')}
+          onComplete={() => setActiveTab('customers')}
         />;
       case 'reports':
         return <Reports 
