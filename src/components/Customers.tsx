@@ -197,7 +197,7 @@ export function Customers({
 
   const handleAddCustomer = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newCustomer.name || !newCustomer.phone) return;
+    if (!newCustomer.name) return;
     
     setIsProcessing(true);
     try {
@@ -207,7 +207,7 @@ export function Customers({
       const customer: Customer = {
         id: customerId,
         name: newCustomer.name,
-        phone: newCustomer.phone,
+        phone: newCustomer.phone ? newCustomer.phone.trim() : '',
         balance: balanceNum,
         lastTransactionAt: new Date().toISOString()
       };
@@ -367,7 +367,7 @@ export function Customers({
       img.src = base64Str;
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        const MAX_WIDTH = 400;
+        const MAX_WIDTH = 800;
         if (img.width <= MAX_WIDTH) {
            resolve(base64Str);
            return;
@@ -378,7 +378,7 @@ export function Customers({
         const ctx = canvas.getContext('2d');
         if (!ctx) { resolve(base64Str); return; }
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL('image/jpeg', 0.6));
+        resolve(canvas.toDataURL('image/jpeg', 0.75));
       };
       img.onerror = () => resolve(base64Str);
     });
@@ -1038,9 +1038,9 @@ export function Customers({
                     <div className="relative">
                       <Phone className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                       <input 
-                        required type="tel"
+                        type="tel"
                         className="w-full bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-2xl py-4 pl-14 pr-6 text-sm font-bold dark:text-white focus:bg-white dark:focus:bg-slate-800 focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all outline-none"
-                        placeholder="300 1234567"
+                        placeholder="300 1234567 (Optional)"
                         value={newCustomer.phone}
                         onChange={(e) => setNewCustomer({...newCustomer, phone: e.target.value})}
                       />

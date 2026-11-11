@@ -125,6 +125,9 @@ export const FirestoreService = {
 
   // --- Sync Logic ---
   syncLocalToCloud: async (userId: string) => {
+    if (localStorage.getItem('dukan_has_migrated') === 'true') {
+      return;
+    }
     try {
       // Check if user already has data in the cloud
       const cloudP = await getDocs(query(collection(db, 'products'), where('ownerId', '==', userId), limit(1)));
@@ -338,7 +341,7 @@ export const FirestoreService = {
     try {
       await setDoc(doc(db, 'transactions', tx.id), { ...tx, ownerId: userId });
     } catch (e) {
-      handleFirestoreError(e, OperationType.WRITE, `transactions/${tx.id}`);
+      console.warn("Firestore transaction sync warning (saved locally):", e);
     }
   },
 

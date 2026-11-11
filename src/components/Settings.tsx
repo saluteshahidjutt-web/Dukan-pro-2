@@ -1063,16 +1063,16 @@ export function Settings({ settings, setSettings }: SettingsProps) {
           onCancel={() => setSignOutConfirm(false)}
         />
 
-        <div className="flex items-center gap-2 bg-rose-50 dark:bg-rose-900/10 px-4 py-2 rounded-full border border-rose-100 dark:border-rose-900/30">
-          <span className="w-2 h-2 bg-rose-500 rounded-full animate-pulse" />
-          <span className="text-[10px] font-black text-rose-600 dark:text-rose-400 uppercase tracking-widest">
-            Beta Version
+        <div className="flex items-center gap-2 bg-emerald-50 dark:bg-emerald-900/10 px-4 py-2 rounded-full border border-emerald-100 dark:border-emerald-900/30">
+          <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+          <span className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-widest">
+            Version 2.5 (Pro)
           </span>
         </div>
         <p className="text-[9px] text-slate-400 font-bold uppercase tracking-tighter text-center px-6 mb-4">
-          Exciting new updates and professional features are coming in the future.
+          Dukaan Pro • Digital POS & Udhar Khata
           <br /> 
-          <span className="opacity-60">Build 2026.05.17 • Stable Preview</span>
+          <span className="opacity-60">Build 2026.11.11 • Stable Release</span>
         </p>
 
         <div className="w-full flex justify-center gap-4 text-xs font-medium text-slate-400 dark:text-slate-500 mb-8 mt-2">
