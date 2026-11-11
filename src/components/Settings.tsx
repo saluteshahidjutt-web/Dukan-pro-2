@@ -35,6 +35,12 @@ export function Settings({ settings, setSettings }: SettingsProps) {
   const [isDeletingPhone, setIsDeletingPhone] = useState(false);
   const [isConfirmingDeletePhone, setIsConfirmingDeletePhone] = useState(false);
 
+  // Logo Cropping State
+  const [croppingImageSrc, setCroppingImageSrc] = useState<string | null>(null);
+  const [cropZoom, setCropZoom] = useState<number>(1);
+  const [cropOffsetX, setCropOffsetX] = useState<number>(0);
+  const [cropOffsetY, setCropOffsetY] = useState<number>(0);
+
   // Sync verified status from user profile on mount
   useEffect(() => {
     const checkUserPhoneVerified = async () => {
@@ -296,19 +302,56 @@ export function Settings({ settings, setSettings }: SettingsProps) {
     });
   };
 
-  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleLogoFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
-      reader.onloadend = async () => {
-        try {
-          const compressed = await compressLogo(reader.result as string);
-          setSettings({ ...settings, logoUrl: compressed });
-        } catch (err) {
-          console.error("Logo upload compression failed", err);
-        }
+      reader.onloadend = () => {
+        setCroppingImageSrc(reader.result as string);
+        setCropZoom(1);
+        setCropOffsetX(0);
+        setCropOffsetY(0);
       };
       reader.readAsDataURL(file);
+    }
+  };
+
+  const handleCropAndSaveLogo = async () => {
+    if (!croppingImageSrc) return;
+    try {
+      const img = new Image();
+      img.src = croppingImageSrc;
+      await new Promise((res, rej) => {
+        img.onload = res;
+        img.onerror = rej;
+      });
+
+      const canvas = document.createElement('canvas');
+      const size = 600;
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, size, size);
+
+      ctx.save();
+      ctx.translate(size / 2 + cropOffsetX, size / 2 + cropOffsetY);
+      ctx.scale(cropZoom, cropZoom);
+      
+      const scale = Math.max(size / img.width, size / img.height);
+      const w = img.width * scale;
+      const h = img.height * scale;
+      ctx.drawImage(img, -w / 2, -h / 2, w, h);
+      ctx.restore();
+
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+      const compressed = await compressLogo(dataUrl);
+      setSettings({ ...settings, logoUrl: compressed });
+      setCroppingImageSrc(null);
+    } catch (err) {
+      console.error("Logo crop failed", err);
     }
   };
 
@@ -609,35 +652,7 @@ export function Settings({ settings, setSettings }: SettingsProps) {
         </div>
       </section>
 
-      {/* In-App Direct Chat & Voice Notes Feature Toggle (Undo / Kill Switch) */}
-      <section className="bg-white dark:bg-slate-800 rounded-3xl p-6 border border-slate-100 dark:border-slate-700 shadow-sm space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-             <div className="bg-emerald-600 text-white p-2 rounded-xl">
-               <MessageSquare size={20}/>
-             </div>
-             <div>
-               <h3 className="font-bold text-slate-900 dark:text-white">Dukaan Chat & Voice Notes</h3>
-               <p className="text-[10px] text-slate-400 font-medium">Phone number se direct baatcheet aur voice notes ka feature on ya off karein (Feature Switch / Undo)</p>
-             </div>
-          </div>
-          <button 
-            onClick={() => {
-              const currentStatus = settings.chatEnabled !== false; // defaults to true
-              setSettings({ ...settings, chatEnabled: !currentStatus });
-            }}
-            className={cn(
-              "w-12 h-6 rounded-full transition-all relative",
-              settings.chatEnabled !== false ? 'bg-emerald-600' : 'bg-slate-300 dark:bg-slate-600'
-            )}
-          >
-            <div className={cn(
-              "absolute top-1 w-4 h-4 rounded-full bg-white transition-all",
-              settings.chatEnabled !== false ? 'right-1' : 'left-1'
-            )} />
-          </button>
-        </div>
-      </section>
+
 
       {/* App Security Section */}
       <section className="bg-white dark:bg-slate-800 rounded-3xl p-6 border border-slate-100 dark:border-slate-700 shadow-sm space-y-4">
@@ -724,30 +739,37 @@ export function Settings({ settings, setSettings }: SettingsProps) {
                  <Store size={24}/>
                )}
              </div>
-             <h3 className="font-bold dark:text-white text-lg">{t.shop_profile}</h3>
+             <div>
+               <h3 className="font-bold dark:text-white text-lg">{t.shop_profile}</h3>
+               <p className="text-[10px] text-slate-400 font-medium">Shop logo for receipts & bills</p>
+             </div>
           </div>
-          <div className="flex gap-2">
+          <div className="flex items-center gap-1.5">
              <input 
                type="file" 
                ref={fileInputRef} 
                className="hidden" 
                accept="image/*" 
-               onChange={handleLogoUpload}
+               onChange={handleLogoFileSelect}
              />
              <button 
                onClick={() => fileInputRef.current?.click()}
-               className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5 active:scale-95 transition-all"
+               className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 px-2.5 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1 active:scale-95 transition-all"
+               title="Change Logo"
              >
-               <Upload size={14}/> {settings.logoUrl ? "Change Logo" : "Upload Logo"}
+               <Upload size={13}/> <span>{settings.logoUrl ? "Change" : "Upload"}</span>
              </button>
+             {settings.logoUrl && (
+               <button 
+                 onClick={() => setSettings({ ...settings, logoUrl: '' })}
+                 className="bg-rose-50 hover:bg-rose-100 text-rose-600 dark:bg-rose-950/60 dark:text-rose-400 px-2 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1 active:scale-95 transition-all"
+                 title="Delete Logo"
+               >
+                 <Trash2 size={13}/> <span>Delete</span>
+               </button>
+             )}
           </div>
         </div>
-
-        {settings.logoUrl && (
-          <div className="flex justify-center p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-dashed border-slate-200">
-            <img src={settings.logoUrl} alt="Shop Logo" className="h-20 object-contain" />
-          </div>
-        )}
         
         <div className="space-y-4">
           <div>
@@ -1066,7 +1088,7 @@ export function Settings({ settings, setSettings }: SettingsProps) {
         <div className="flex items-center gap-2 bg-emerald-50 dark:bg-emerald-900/10 px-4 py-2 rounded-full border border-emerald-100 dark:border-emerald-900/30">
           <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
           <span className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-widest">
-            Version 2.5 (Pro)
+            Version 2.6 (Pro)
           </span>
         </div>
         <p className="text-[9px] text-slate-400 font-bold uppercase tracking-tighter text-center px-6 mb-4">
@@ -1102,6 +1124,72 @@ export function Settings({ settings, setSettings }: SettingsProps) {
         title="Terms & Conditions"
         content={<TermsContent />}
       />
+
+      {croppingImageSrc && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white dark:bg-slate-900 rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-black text-slate-900 dark:text-white text-base">Crop Shop Logo</h3>
+              <button 
+                onClick={() => setCroppingImageSrc(null)}
+                className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-500 hover:text-slate-900"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="flex flex-col items-center justify-center space-y-3">
+              <div className="relative w-64 h-64 bg-slate-100 dark:bg-slate-800 rounded-2xl overflow-hidden border-2 border-emerald-500 shadow-inner flex items-center justify-center">
+                <img 
+                  src={croppingImageSrc} 
+                  alt="Crop Preview" 
+                  className="max-w-none transition-transform duration-75"
+                  style={{
+                    transform: `translate(${cropOffsetX}px, ${cropOffsetY}px) scale(${cropZoom})`,
+                    maxHeight: '100%',
+                    maxWidth: '100%',
+                    objectFit: 'contain'
+                  }}
+                />
+                <div className="absolute inset-0 border-2 border-dashed border-emerald-400/80 pointer-events-none rounded-2xl m-2" />
+              </div>
+
+              <div className="w-full space-y-2">
+                <div className="flex justify-between text-xs font-bold text-slate-500">
+                  <span>Zoom</span>
+                  <span>{cropZoom.toFixed(1)}x</span>
+                </div>
+                <input 
+                  type="range" 
+                  min="0.5" 
+                  max="3" 
+                  step="0.1" 
+                  value={cropZoom}
+                  onChange={(e) => setCropZoom(parseFloat(e.target.value))}
+                  className="w-full accent-emerald-600"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 w-full pt-2">
+                <button
+                  type="button"
+                  onClick={() => setCroppingImageSrc(null)}
+                  className="py-3 bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl font-bold text-xs"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCropAndSaveLogo}
+                  className="py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-xs shadow-lg shadow-emerald-600/30"
+                >
+                  Crop & Save Logo
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
